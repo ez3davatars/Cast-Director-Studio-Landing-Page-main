@@ -28,7 +28,7 @@ export async function beginCheckout(productKey: string) {
             },
             body: JSON.stringify({
                 productKey,
-                redirectUrl: `${window.location.origin}/checkout/success`,
+                redirectUrl: `${window.location.origin}/?checkout=success`,
             }),
         },
     );

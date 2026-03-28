@@ -1,0 +1,24 @@
+
+--- Table: products ---
+id, name, description, sku, price_usd, stripe_product_id, stripe_price_id, product_type, billing_interval, features, max_activations, is_active, sort_order, created_at, updated_at, desktop_app_access, hosted_generation_access, byok_generation_access, monthly_credits, digital_double_limit, commercial_rights, priority_support, perpetual_use, updates_included_months
+
+--- Table: orders (Empty) ---
+Exists. Couldn't parse columns automatically because it's empty.
+
+--- Table: order_items (Empty) ---
+Exists. Couldn't parse columns automatically because it's empty.
+
+--- Table: licenses (Empty) ---
+Exists. Couldn't parse columns automatically because it's empty.
+
+--- Table: downloads (Empty) ---
+Exists. Couldn't parse columns automatically because it's empty.
+
+--- Table: entitlements (Empty) ---
+Exists. Couldn't parse columns automatically because it's empty.
+
+--- Table: subscriptions (Empty) ---
+Exists. Couldn't parse columns automatically because it's empty.
+
+--- Table: stripe_webhooks (Empty) ---
+Exists. Couldn't parse columns automatically because it's empty.

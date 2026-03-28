@@ -1,0 +1,4 @@
+project_id = "wtgkeytabshxtspjoegb"
+
+[functions.create-checkout-session]
+verify_jwt = false
