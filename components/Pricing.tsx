@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { Check, Loader2 } from 'lucide-react';
 import DuplicatePurchaseModal from './DuplicatePurchaseModal';
-import { getProductByKey, getProductByStripePriceId } from '../lib/products';
+import { getProductByKey, getProductByStripePriceId, resolveCatalogEntryFromDbProduct, resolveDisplayName } from '../lib/products';
 import { supabase } from '../lib/supabase';
 
 interface PricingProps {
@@ -148,13 +148,13 @@ const Pricing: React.FC<PricingProps> = ({
         return;
       }
 
+      // Catalog-driven Success Routing
       let successType = 'byok';
-      const pType = (product.product_type || '').toLowerCase();
-      
-      if (pType.includes('sub') || pType.includes('hosted')) {
-        successType = 'hosted';
-      } else if (pType.includes('renew')) {
-        successType = 'renewal';
+      const catalogEntry = resolveCatalogEntryFromDbProduct(product);
+      if (catalogEntry) {
+          if (catalogEntry.productType === 'subscription') successType = 'hosted';
+          else if (catalogEntry.productType === 'support_plan') successType = 'renewal';
+          else if (catalogEntry.productType === 'desktop_license') successType = 'byok';
       }
 
       const returnUrl = `${window.location.origin}/success/${successType}`;
@@ -169,12 +169,14 @@ const Pricing: React.FC<PricingProps> = ({
       });
 
       if (error) {
-        if (error.message?.includes('401') || error.message?.includes('non-2xx') || error.message?.includes('409')) {
-            const errStr = await error.context?.json?.() || error.message;
-            if (JSON.stringify(errStr).includes('duplicate_purchase') || error.message.includes('409')) {
+        if (error.message?.includes('401') || error.message?.includes('non-2xx') || error.message?.includes('409') || error.message?.includes('duplicate_purchase')) {
+            let parsedErr;
+            try { parsedErr = await error.context?.json?.(); } catch(e){}
+            
+            if ((parsedErr && parsedErr.error === 'duplicate_purchase') || error.message.includes('409') || error.message.includes('duplicate_purchase')) {
                 setCheckoutError("Server blocked purchase to prevent a duplicate charge. Please check your dashboard.");
             } else {
-                setCheckoutError("Checkout was rejected by the server. " + error.message);
+                setCheckoutError("Checkout was rejected by the server. " + (parsedErr?.message || error.message));
             }
             throw new Error("Rejected by checkout Edge Function.");
         }
@@ -195,6 +197,41 @@ const Pricing: React.FC<PricingProps> = ({
     }
   };
 
+  const executePreCheck = async (product: any, catalogEntry: any) => {
+    if (catalogEntry && catalogEntry.duplicatePolicy !== 'allow') {
+        const isSupport = catalogEntry.productType === 'support_plan';
+        const { data: licenses } = await supabase.from('licenses')
+            .select('*, products ( name )')
+            .eq('user_id', session!.user.id)
+            .ilike('status', 'active');
+            
+        const { data: subs } = await supabase.from('subscriptions').select('metadata, status').eq('user_id', session!.user.id);
+        
+        let hasMatch = false;
+        if (licenses) {
+            hasMatch = hasMatch || licenses.some((l: any) => {
+                const lEntry = getProductByStripePriceId(l.stripe_price_id) || getProductByKey(l.product_id);
+                const pName = product.name || '';
+                const ownedName = (l.license_name || l.products?.name || '').toLowerCase().trim();
+                const targetName = pName.toLowerCase().trim();
+                
+                return (lEntry && lEntry.productKey === catalogEntry.productKey) || 
+                       l.product_id === product.id ||
+                       (ownedName && targetName && ownedName === targetName);
+            });
+        }
+        if (subs && !hasMatch) {
+            hasMatch = hasMatch || subs.some((s: any) => s.status === 'active' && s.metadata?.stripe_price_id === product.stripe_price_id);
+        }
+        
+        if (hasMatch) {
+            setDuplicateWarning({ product, duplicateType: catalogEntry.duplicatePolicy, isSupport });
+            return false;
+        }
+    }
+    return true;
+  };
+
   const handleCheckout = async (product: any) => {
     if (!session) {
       onSignIn();
@@ -210,56 +247,19 @@ const Pricing: React.FC<PricingProps> = ({
     setCheckoutError(null);
 
     try {
-       const pKey = product.product_key || product.metadata?.product_key;
-       const catalogEntry = getProductByKey(pKey) || getProductByStripePriceId(product.stripe_price_id);
+       const catalogEntry = resolveCatalogEntryFromDbProduct(product);
        
-       console.log("=============== DEBUG PRICING ===============");
-       console.log("Raw Product from DB:", JSON.stringify(product, null, 2));
-       console.log("Extracted pKey:", pKey);
-       console.log("Extracted stripe_price_id:", product.stripe_price_id);
-       if (catalogEntry && catalogEntry.duplicatePolicy !== 'allow') {
-           const isSupport = catalogEntry.productType === 'support_plan';
-           // Fetch licenses with a JOIN on products so we can examine the legacy product name even if the UUIDs don't match
-           const { data: licenses } = await supabase.from('licenses')
-               .select('*, products ( name )')
-               .eq('user_id', session.user.id)
-               .ilike('status', 'active');
-               
-           const { data: subs } = await supabase.from('subscriptions').select('metadata, status').eq('user_id', session.user.id);
-           
-           let hasMatch = false;
-           // Check licenses
-           if (licenses) {
-               hasMatch = hasMatch || licenses.some((l: any) => {
-                   const lEntry = getProductByStripePriceId(l.stripe_price_id) || getProductByKey(l.product_id);
-                   const pName = product.name || '';
-                   
-                   // Determine the name of the license they already own
-                   const ownedName = (l.license_name || l.products?.name || '').toLowerCase().trim();
-                   const targetName = pName.toLowerCase().trim();
-                   
-                   return (lEntry && lEntry.productKey === catalogEntry.productKey) || 
-                          l.product_id === product.id ||
-                          (ownedName && targetName && ownedName === targetName);
-               });
-           }
-           // Check subscriptions (simplified check looking for matching metadata product_key or price_id)
-           if (subs && !hasMatch) {
-               hasMatch = hasMatch || subs.some((s: any) => s.status === 'active' && s.metadata?.stripe_price_id === product.stripe_price_id);
-           }
-           
-           if (hasMatch) {
-               setCheckingOutProductId(null);
-               setDuplicateWarning({ product, duplicateType: catalogEntry.duplicatePolicy, isSupport });
-               return;
-           }
+       const passedPreCheck = await executePreCheck(product, catalogEntry);
+       if (!passedPreCheck) {
+           setCheckingOutProductId(null);
+           return;
        }
        
        await executeCheckout(product, false);
 
     } catch(err: any) {
        console.error("Pre-checkout check failed", err);
-       setCheckoutError("Debug Mode Trapped Error: " + (err.message || String(err)));
+       setCheckoutError("Pre-checkout check failed: " + (err.message || String(err)));
        setCheckingOutProductId(null);
     }
   };
@@ -302,38 +302,58 @@ const Pricing: React.FC<PricingProps> = ({
             <p>Loading active products...</p>
           </div>
         ) : products.length > 0 ? (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto items-stretch">
-            {products.map((product) => {
-              // Resilient mapping since we don't know the exact schema
-              const name = product.name || 'Plan';
-              const price = product.price != null ? `$${product.price}` : product.metadata?.price ? `$${product.metadata.price}` : 'Live Price';
-              const billingSuffix = product.interval ? `/${product.interval}` : product.metadata?.billingSuffix || '';
-              
-              let features: string[] = [];
-              if (Array.isArray(product.features)) features = product.features;
-              else if (Array.isArray(product.metadata?.features)) features = product.metadata.features;
-              else if (typeof product.features === 'string') {
-                try { features = JSON.parse(product.features); } catch (e) { features = [product.features]; }
-              } else if (product.description) {
-                features = [product.description];
-              }
+          <div className="flex flex-col gap-16">
+            {/* Merchandised Group Rendering */}
+            {[
+              { title: "Hosted Plans", keys: ['starter', 'pro'] },
+              { title: "Desktop Ownership", keys: ['indie_desktop_byok', 'agency_desktop_byok'] },
+              { title: "Updates & Support", keys: ['indie_updates_support', 'agency_updates_support'] }
+            ].map((section) => {
+              const sectionProducts = section.keys.map(k => {
+                 return products.find(p => resolveCatalogEntryFromDbProduct(p)?.productKey === k || p.product_key === k || p.metadata?.product_key === k);
+              }).filter(Boolean);
 
-              const isPopular = product.is_popular === true || product.metadata?.isPopular === 'true' || product.metadata?.isPopular === true;
+              if (sectionProducts.length === 0) return null;
 
               return (
-                <PricingCard
-                  key={product.id || name}
-                  name={name}
-                  price={price}
-                  billingSuffix={billingSuffix}
-                  isPopular={isPopular}
-                  features={features.length > 0 ? features : ['Standard support', 'Updates included']}
-                  ctaText={checkingOutProductId === product.id ? 'Starting...' : (product.metadata?.ctaText || product.ctaText || 'Get Access')}
-                  onCheckout={() => {
-                    if (checkingOutProductId) return; // Prevent double clicks on other cards
-                    handleCheckout(product);
-                  }}
-                />
+                <div key={section.title} className="max-w-6xl mx-auto w-full">
+                  <h3 className="text-xl md:text-2xl font-mono text-white mb-6 uppercase tracking-wider border-b border-nano-border pb-4">{section.title}</h3>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
+                    {sectionProducts.map((product) => {
+                      const catalogEntry = resolveCatalogEntryFromDbProduct(product);
+                      const name = resolveDisplayName({ productKey: catalogEntry?.productKey, stripePriceId: product.stripe_price_id, fallbackName: product.name });
+                      const price = product.price != null ? `$${product.price}` : product.metadata?.price ? `$${product.metadata.price}` : 'Live Price';
+                      const billingSuffix = product.interval ? `/${product.interval}` : product.metadata?.billingSuffix || '';
+                      
+                      let features: string[] = [];
+                      if (Array.isArray(product.features)) features = product.features;
+                      else if (Array.isArray(product.metadata?.features)) features = product.metadata.features;
+                      else if (typeof product.features === 'string') {
+                        try { features = JSON.parse(product.features); } catch (e) { features = [product.features]; }
+                      } else if (product.description) {
+                        features = [product.description];
+                      }
+
+                      const isPopular = product.is_popular === true || product.metadata?.isPopular === 'true' || product.metadata?.isPopular === true;
+
+                      return (
+                        <PricingCard
+                          key={product.id || name}
+                          name={name}
+                          price={price}
+                          billingSuffix={billingSuffix}
+                          isPopular={isPopular}
+                          features={features.length > 0 ? features : ['Standard support', 'Updates included']}
+                          ctaText={checkingOutProductId === product.id ? 'Starting...' : (product.metadata?.ctaText || product.ctaText || 'Get Access')}
+                          onCheckout={() => {
+                            if (checkingOutProductId) return;
+                            handleCheckout(product);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </div>

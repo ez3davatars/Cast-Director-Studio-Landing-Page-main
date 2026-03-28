@@ -52,10 +52,17 @@ ADD COLUMN IF NOT EXISTS stripe_price_id text,
 ADD COLUMN IF NOT EXISTS product_type text,
 ADD COLUMN IF NOT EXISTS license_type text,
 ADD COLUMN IF NOT EXISTS platform text,
-ADD COLUMN IF NOT EXISTS file_type text;
+ADD COLUMN IF NOT EXISTS file_type text,
+ADD COLUMN IF NOT EXISTS installer_object_key text,
+ADD COLUMN IF NOT EXISTS installer_version text;
 
 -- 2. Orders
 ALTER TABLE public.orders
+ADD COLUMN IF NOT EXISTS stripe_session_id text,
+ADD COLUMN IF NOT EXISTS stripe_invoice_id text,
+ADD COLUMN IF NOT EXISTS total_amount numeric,
+ADD COLUMN IF NOT EXISTS payment_status text DEFAULT 'paid',
+ADD COLUMN IF NOT EXISTS fulfillment_status text DEFAULT 'fulfilled',
 ADD COLUMN IF NOT EXISTS is_test_mode boolean DEFAULT false;
 
 -- 3. Order Items

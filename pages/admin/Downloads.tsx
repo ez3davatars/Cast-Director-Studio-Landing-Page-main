@@ -21,7 +21,7 @@ const DownloadsAdmin: React.FC = () => {
         setData(result || []);
       } catch (err: any) {
         console.warn("Downloads fetch error:", err);
-        setError(err.message || 'Failed to fetch downloads (Schema mismatch likely)');
+        setError(err.message || 'Failed to fetch downloads (missing database fields expected)');
       } finally {
         setLoading(false);
       }
@@ -42,7 +42,7 @@ const DownloadsAdmin: React.FC = () => {
       {error && (
         <div className="bg-orange-500/10 border border-orange-500/50 text-orange-400 p-4 rounded mb-6 font-mono text-sm">
           <strong>Operational Notice:</strong> {error}. <br/>
-          (The admin UI is fail-soft. This indicates the newly requested tracking columns do not exist yet on the remote database schema.)
+          (The admin UI will still function, but some expected download fields may not yet exist in the database.)
         </div>
       )}
 

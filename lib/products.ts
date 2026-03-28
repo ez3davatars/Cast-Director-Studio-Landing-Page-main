@@ -82,3 +82,44 @@ export function getDuplicatePolicy(productKey: ProductKey | string | null): 'blo
     const product = getProductByKey(productKey);
     return product ? product.duplicatePolicy : 'allow'; // safe default
 }
+
+export function resolveCatalogEntryFromDbProduct(productRow: any): ProductCatalogEntry | undefined {
+  if (!productRow) return undefined;
+  
+  const key = productRow.product_key || productRow.metadata?.product_key;
+  if (key) {
+    const mapped = getProductByKey(key);
+    if (mapped) return mapped;
+  }
+  
+  if (productRow.stripe_price_id) {
+    const mapped = getProductByStripePriceId(productRow.stripe_price_id);
+    if (mapped) return mapped;
+  }
+  
+  return undefined;
+}
+
+export function resolveDisplayName({ productKey, stripePriceId, fallbackName }: { productKey?: string, stripePriceId?: string, fallbackName?: string }): string {
+  if (productKey) {
+    const mapped = getProductByKey(productKey);
+    if (mapped?.displayName) return mapped.displayName;
+  }
+  if (stripePriceId) {
+    const mapped = getProductByStripePriceId(stripePriceId);
+    if (mapped?.displayName) return mapped.displayName;
+  }
+  return fallbackName || 'Cast Director Studio Product';
+}
+
+export function isSubscriptionProduct(entry: ProductCatalogEntry | undefined): boolean {
+  return entry?.productType === 'subscription';
+}
+
+export function isSupportPlan(entry: ProductCatalogEntry | undefined): boolean {
+  return entry?.productType === 'support_plan';
+}
+
+export function isDesktopLicense(entry: ProductCatalogEntry | undefined): boolean {
+  return entry?.productType === 'desktop_license';
+}

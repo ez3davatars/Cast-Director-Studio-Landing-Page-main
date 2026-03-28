@@ -22,6 +22,7 @@ import CustomersAdmin from './pages/admin/Customers';
 import CustomerDetailAdmin from './pages/admin/CustomerDetail';
 import InboxAdmin from './pages/admin/Inbox';
 import Success from './pages/Success';
+import DownloadHandler from './pages/DownloadHandler';
 import { supabase } from './lib/supabase';
 
 function App() {
@@ -91,6 +92,9 @@ function App() {
         <Route path="/" element={LandingPage} />
         
         <Route path="/success/:type" element={<Success />} />
+        
+        {/* Secure Cloudflare R2 Delivery Handoff Route */}
+        <Route path="/download/:id" element={<DownloadHandler />} />
 
         <Route
           path="/account"

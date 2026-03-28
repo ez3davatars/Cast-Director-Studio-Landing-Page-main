@@ -67,7 +67,7 @@ const LicensesAdmin: React.FC = () => {
 
         setData(validLics);
       } catch (err: any) {
-        setError(err.message || 'Failed to establish License telemetry bridges.');
+        setError(err.message || 'Failed to establish License records.');
       } finally {
         setLoading(false);
       }
@@ -90,7 +90,7 @@ const LicensesAdmin: React.FC = () => {
       });
       if (invokeErr) throw new Error(invokeErr.message);
       if (data?.error) throw new Error(data.error);
-      alert("License Pack dispatched successfully.");
+      alert("License email sent successfully.");
     } catch (e: any) {
       alert(`Resend Failed: ${e.message}`);
     } finally {
@@ -111,7 +111,7 @@ const LicensesAdmin: React.FC = () => {
       
       {error && (
         <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded mb-6 font-mono text-sm">
-          Failed to load structural keys: {error}
+          Failed to load license records: {error}
         </div>
       )}
 
@@ -140,7 +140,7 @@ const LicensesAdmin: React.FC = () => {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-gray-500 italic text-sm">No localized keys matched.</td>
+                  <td colSpan={5} className="p-8 text-center text-gray-500 italic text-sm">No license records matched.</td>
                 </tr>
               ) : (
                 filtered.map((row) => {

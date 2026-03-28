@@ -1,3 +1,7 @@
+/**
+ * @deprecated This is a legacy Lemon Squeezy path.
+ * It is not part of the live Stripe launch flow and should not be imported.
+ */
 import { supabase } from './supabase';
 
 export async function beginCheckout(productKey: string) {

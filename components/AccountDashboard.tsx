@@ -160,7 +160,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                     });
                 } else {
                     items.forEach((item: any) => {
-                        const identity = resolveIdentity('order', item.product_name_snapshot, item.id, o.id, item.product_id, item.stripe_price_id, 'Unnamed Product', item);
+                        const identity = resolveIdentity('order', item.product_name_snapshot, item.id, o.id, item.product_id, item.stripe_price_id, 'Cast Director Studio Product', item);
                         mappedOrders.push({
                             orderNumber: o.order_number || o.id?.substring(0, 8) || 'Unknown',
                             productName: identity.name,
@@ -177,7 +177,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             fetchedLicenses.forEach((l: any) => {
                 const key = l.license_key || 'KEY-MISSING';
                 const masked = key.length > 10 ? `${key.substring(0, 5)}...${key.substring(key.length - 5)}` : '••••••••••••';
-                const identity = resolveIdentity('license', l.license_name, l.order_item_id, l.order_id, l.product_id, l.stripe_price_id, 'Unnamed License', l);
+                const identity = resolveIdentity('license', l.license_name, l.order_item_id, l.order_id, l.product_id, l.stripe_price_id, 'Cast Director Studio License', l);
 
                 mappedLicenses.push({
                     licenseName: identity.name,
@@ -213,7 +213,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 const selectedToken = validTokens.length > 0 ? validTokens[0] : tokens[0];
                 const isAvailable = selectedToken.expires_at ? new Date(selectedToken.expires_at) > now : false;
 
-                const identity = resolveIdentity('download', selectedToken.display_name, selectedToken.order_item_id, selectedToken.order_id, selectedToken.product_id, selectedToken.stripe_price_id, 'Unnamed Download', selectedToken);
+                const identity = resolveIdentity('download', selectedToken.display_name, selectedToken.order_item_id, selectedToken.order_id, selectedToken.product_id, selectedToken.stripe_price_id, 'Cast Director Studio Download', selectedToken);
                 
                 const catalogEntry = getProductByStripePriceId(identity.resolvedPriceId) || getProductByKey(identity.resolvedProductKey);
                 
@@ -331,12 +331,12 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
                                 <div className="rounded-sm border border-nano-border bg-nano-panel/40 p-6">
                                     <div className="text-sm uppercase tracking-wide text-nano-text mb-2">
-                                        Total Purchases
+                                        Active Subscriptions
                                     </div>
                                     <div className="text-4xl font-bold text-white">
-                                        {orders ? orders.length : 0}
+                                        {subscriptions ? subscriptions.filter(s => s.status === 'active').length : 0}
                                     </div>
-                                    <p className="text-xs text-nano-text mt-2">Lifetime orders</p>
+                                    <p className="text-xs text-nano-text mt-2">Currently active plans</p>
                                 </div>
                             </div>
 
@@ -492,12 +492,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                                     Link Expired
                                                                 </button>
                                                             )}
-                                                            
-                                                            {dl.canGenerateNewLink && (
-                                                                <button className="px-4 py-2 bg-transparent text-nano-yellow font-bold text-xs uppercase tracking-wide border border-nano-yellow/50 hover:bg-nano-yellow/10 transition-colors">
-                                                                    Generate New Link
-                                                                </button>
-                                                            )}
+                                                            {/* Generate New Link button intentionally hidden until the feature is active */}
                                                         </div>
                                                         <div className="mt-4 pt-3 border-t border-nano-border/30 text-[10px] text-nano-text/80 leading-relaxed">
                                                             Your purchase remains active even if this download link expires.

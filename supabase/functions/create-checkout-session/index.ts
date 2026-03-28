@@ -42,7 +42,7 @@ serve(async (req: Request) => {
 
     if (userError || !user) {
       // Intentionally surfacing 401 if the JWT was somehow bypassed, tampered, or expired.
-      return new Response(JSON.stringify({ error: "Unauthorized access or missing valid JWT token", details: userError }), {
+      return new Response(JSON.stringify({ error: "Unauthorized access or missing valid JWT token", code: "unauthorized", message: "Unauthorized access or missing valid JWT token", details: userError }), {
         status: 401, 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -52,14 +52,14 @@ serve(async (req: Request) => {
     const { priceId, successUrl, cancelUrl, allowDuplicatePurchase } = await req.json();
 
     if (!priceId) {
-      return new Response(JSON.stringify({ error: "Missing required metadata: stripe_price_id" }), {
+      return new Response(JSON.stringify({ error: "Missing required metadata: stripe_price_id", code: "bad_request", message: "Missing required metadata: stripe_price_id" }), {
         status: 400, // 400 Bad Request
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     if (!Deno.env.get("STRIPE_SECRET_KEY")) {
-      return new Response(JSON.stringify({ error: "Backend Configuration Error: Missing STRIPE_SECRET_KEY" }), {
+      return new Response(JSON.stringify({ error: "Backend Configuration Error", code: "server_configuration_error", message: "Missing STRIPE_SECRET_KEY" }), {
         status: 500, // Explicitly surfacing missing keys as 500, not 401
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -99,8 +99,10 @@ serve(async (req: Request) => {
            if (allowDuplicatePurchase !== true) {
                return new Response(JSON.stringify({ 
                    error: "duplicate_purchase",
+                   code: "duplicate_purchase",
+                   message: `You already own an active license or subscription for ${product.name || 'this product'}.`,
                    productKey: product.product_key,
-                   productName: "Requested Product",
+                   productName: product.name,
                    reason: "active_license_exists"
                }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
            }
@@ -175,14 +177,14 @@ serve(async (req: Request) => {
     if (err.raw?.statusCode === 401 || err.statusCode === 401 || err.type === "StripeAuthenticationError") {
        // STRIPE IS RETURNING 401
        console.error("CRITICAL: Stripe API rejected the backend request! 401 Unauthorized.");
-       return new Response(JSON.stringify({ error: "Stripe API Key Invalid or Missing Permissions" }), {
+       return new Response(JSON.stringify({ error: "Stripe API Error", code: "stripe_auth_error", message: "Stripe API Key Invalid or Missing Permissions" }), {
          status: 500, // Rebranding remote 401 to local 500 so frontend doesn't falsely drop the user's session
          headers: { ...corsHeaders, "Content-Type": "application/json" },
        });
     }
 
     console.error("Internal Edge Function Error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: "Internal Server Error", code: "internal_error", message: err.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
