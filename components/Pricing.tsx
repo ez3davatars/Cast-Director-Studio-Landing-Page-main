@@ -30,71 +30,88 @@ const PricingCard: React.FC<PricingCardProps> = ({
   billingSuffix,
   onCheckout,
 }) => {
+  // Sanitize feature labels from Supabase for public display clarity
+  const featureLabelMap: Record<string, string> = {
+    'Batch Rendering': 'Multi-Shot Rendering',
+  };
+
+  const renderFeature = (feat: string, i: number) => {
+    let display = String(feat);
+    if (typeof feat === 'object' && feat !== null) {
+      if ((feat as any).display_name) {
+        const name = (feat as any).display_name;
+        const val = (feat as any).display_value;
+        const rawVal = (feat as any).value;
+        
+        if (val) {
+          display = `${name}: ${val}`;
+        } else if (typeof rawVal === 'number' || typeof rawVal === 'string') {
+          display = `${name}: ${rawVal}`;
+        } else {
+          display = name;
+        }
+      } else {
+        display = (feat as any).name || (feat as any).text || JSON.stringify(feat);
+      }
+    }
+
+    // Apply label sanitization
+    display = featureLabelMap[display] || display;
+
+    return (
+      <li key={i} className="flex items-start gap-4 text-[15px] leading-snug text-slate-300">
+        <Check size={18} className={`mt-0.5 shrink-0 ${isPopular ? 'text-nano-yellow' : 'text-emerald-400'}`} strokeWidth={3} />
+        <span>{display}</span>
+      </li>
+    );
+  };
+
   return (
     <div
-      className={`relative flex flex-col p-8 rounded-sm transition-all duration-300 ${isPopular
-          ? 'bg-nano-panel border border-nano-yellow transform scale-105 shadow-[0_0_30px_rgba(250,204,21,0.15)] z-10'
-          : 'bg-nano-panel/40 border border-nano-border hover:border-nano-text'
+      className={`relative flex flex-col rounded-[28px] transition-all duration-300 h-full overflow-hidden ${isPopular
+          ? 'bg-gradient-to-b from-amber-950/30 via-[#0f172a] to-nano-surface1 ring-1 ring-nano-yellow/30 transform scale-105 z-10'
+          : 'bg-nano-surface1/60 border border-white/[0.06] hover:ring-1 hover:ring-white/20'
         }`}
     >
       {isPopular && (
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-nano-yellow text-black text-xs font-bold px-4 py-1 rounded-full uppercase tracking-wider shadow-lg">
+        <div className="w-full bg-gradient-to-r from-nano-yellow via-amber-400 to-nano-yellow text-black text-[11px] font-bold px-5 py-2 text-center uppercase tracking-[0.2em]">
           Most Popular
         </div>
       )}
 
-      <div className="mb-8">
-        <h3 className="text-lg font-mono text-nano-text uppercase tracking-widest mb-2">
-          {name}
-        </h3>
-        <div className="flex items-baseline gap-1">
-          <span className="text-4xl font-bold text-white">{price}</span>
-          {billingSuffix && <span className="text-nano-text">{billingSuffix}</span>}
+      <div className="flex-1 flex flex-col p-10">
+        <div className="mb-10">
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-[0.2em] mb-4 font-display">
+            {name}
+          </h3>
+          <div className="flex items-baseline gap-1">
+            <span className="text-5xl font-bold text-white tracking-tight font-display">{price}</span>
+            {billingSuffix && <span className="text-slate-400 font-medium ml-1">{billingSuffix}</span>}
+          </div>
+          {/* Editorial rule under price */}
+          <div className="mt-4 h-[1px] w-full bg-gradient-to-r from-white/[0.06] to-transparent" />
         </div>
+
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 mb-10">
+          {features.map((feat, i) => renderFeature(feat, i))}
+        </ul>
+
+        {/* Spacer pushes CTA to bottom of equal-height cards */}
+        <div className="flex-1" />
+
+        <button
+          type="button"
+          disabled={isPopular === null ? false : undefined}
+          onClick={onCheckout}
+          className={`w-full py-4 px-6 rounded-full text-sm font-bold tracking-wide uppercase transition-all flex items-center justify-center gap-2 ${isPopular
+              ? 'bg-nano-yellow text-black hover:bg-[#eab308] hover:shadow-[0_0_20px_rgba(250,204,21,0.3)] hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0'
+              : 'bg-white/10 text-white hover:bg-[#d4a017] hover:text-black hover:shadow-[0_0_20px_rgba(212,160,23,0.35)] hover:-translate-y-0.5 disabled:opacity-50'
+            }`}
+        >
+          {ctaText === 'Starting...' && <Loader2 size={16} className="animate-spin" />}
+          {ctaText}
+        </button>
       </div>
-
-      <ul className="flex-1 space-y-4 mb-8">
-        {features.map((feat, i) => {
-          let display = String(feat);
-          if (typeof feat === 'object' && feat !== null) {
-            if ((feat as any).display_name) {
-              const name = (feat as any).display_name;
-              const val = (feat as any).display_value;
-              const rawVal = (feat as any).value;
-              
-              if (val) {
-                display = `${name}: ${val}`;
-              } else if (typeof rawVal === 'number' || typeof rawVal === 'string') {
-                display = `${name}: ${rawVal}`;
-              } else {
-                display = name;
-              }
-            } else {
-              display = (feat as any).name || (feat as any).text || JSON.stringify(feat);
-            }
-          }
-
-          return (
-            <li key={i} className="flex items-start gap-3 text-sm text-gray-300">
-              <Check size={16} className="text-nano-yellow mt-0.5 shrink-0" />
-              <span>{display}</span>
-            </li>
-          );
-        })}
-      </ul>
-
-      <button
-        type="button"
-        disabled={isPopular === null ? false : undefined /* hack to fix unused warning */}
-        onClick={onCheckout}
-        className={`w-full py-4 px-6 rounded-sm text-sm font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-2 ${isPopular
-            ? 'bg-nano-yellow text-black hover:bg-nano-gold disabled:opacity-50'
-            : 'bg-white/10 text-white hover:bg-white/20 disabled:opacity-50'
-          }`}
-      >
-        {ctaText === 'Starting...' && <Loader2 size={16} className="animate-spin" />}
-        {ctaText}
-      </button>
     </div>
   );
 };
@@ -265,16 +282,27 @@ const Pricing: React.FC<PricingProps> = ({
   };
 
   return (
-    <section id="pricing" className="py-24 bg-nano-dark border-t border-nano-border">
-      <div className="container mx-auto px-6">
-        <div className="text-center mb-10">
-          <h2 className="text-3xl md:text-5xl font-bold mb-4">PRICING</h2>
-          <p className="text-nano-text max-w-3xl mx-auto mb-2">
-            Review our active plans and capabilities below.
-          </p>
-          <div className="inline-flex items-center justify-center space-x-2 bg-nano-panel/50 border border-nano-border rounded-full px-4 py-1.5 text-xs text-nano-text uppercase tracking-wider">
-             <span className="w-2 h-2 rounded-full bg-nano-yellow animate-pulse"></span>
-             <span>Available for Windows 10/11. Mac coming soon.</span>
+    <section id="pricing" className="py-32 relative z-10">
+      {/* Warm section divider */}
+      <div className="absolute top-0 left-0 w-full section-divider-warm" />
+      
+      <div className="container mx-auto px-6 relative z-10">
+        <div className="mx-auto mb-20 max-w-4xl text-center glass-panel-premium p-8 md:p-14 rounded-[32px] relative overflow-hidden shadow-2xl">
+          {/* Enhanced top gradient line */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[2px] bg-gradient-to-r from-transparent via-nano-yellow/60 to-transparent" />
+          {/* Subtle noise overlay */}
+          <div className="absolute inset-0 surface-noise opacity-30 pointer-events-none" />
+          
+          <h2 className="font-display text-3xl font-bold tracking-tight text-white md:text-[40px] leading-tight mb-8 relative z-10">
+            One Local Desktop App.<br className="hidden md:block" /> Two Ways to Power Generation.
+          </h2>
+          <div className="max-w-2xl mx-auto space-y-5 relative z-10">
+            <p className="text-[16px] leading-relaxed text-slate-300 font-medium">
+              Cast Director Studio is always a local desktop app with the same core tools and workflow. Users can either connect their own Gemini API key or use EZ3D Avatars' credit-based access.
+            </p>
+            <p className="text-[16px] leading-relaxed text-slate-300">
+              Some packages include credits upfront, and additional credits can be purchased as needed. The difference is in usage and billing, not in feature access.
+            </p>
           </div>
         </div>
 
@@ -291,7 +319,7 @@ const Pricing: React.FC<PricingProps> = ({
             />
         )}
         {checkoutError && (
-          <div className="max-w-3xl mx-auto mb-8 p-4 border border-red-500/50 bg-red-900/20 text-red-200 text-center text-sm">
+          <div className="max-w-3xl mx-auto mb-8 p-4 border border-red-500/50 bg-red-900/20 text-red-200 text-center text-sm rounded-xl">
             {checkoutError}
           </div>
         )}
@@ -305,7 +333,7 @@ const Pricing: React.FC<PricingProps> = ({
           <div className="flex flex-col gap-16">
             {/* Merchandised Group Rendering */}
             {[
-              { title: "Hosted Plans", keys: ['starter', 'pro'] },
+              { title: "Credit Plans & Subscriptions", keys: ['starter', 'pro'] },
               { title: "Desktop Ownership", keys: ['indie_desktop_byok', 'agency_desktop_byok'] },
               { title: "Updates & Support", keys: ['indie_updates_support', 'agency_updates_support'] }
             ].map((section) => {
@@ -317,8 +345,11 @@ const Pricing: React.FC<PricingProps> = ({
 
               return (
                 <div key={section.title} className="max-w-6xl mx-auto w-full">
-                  <h3 className="text-xl md:text-2xl font-mono text-white mb-6 uppercase tracking-wider border-b border-nano-border pb-4">{section.title}</h3>
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
+                  <h3 className="text-[11px] font-display font-bold text-slate-400 mb-8 uppercase tracking-[0.3em] flex items-center gap-4">
+                    <span>{section.title}</span>
+                    <div className="h-[1px] flex-1 bg-gradient-to-r from-white/10 to-transparent" />
+                  </h3>
+                  <div className="grid md:grid-cols-2 gap-8 items-stretch">
                     {sectionProducts.map((product) => {
                       const catalogEntry = resolveCatalogEntryFromDbProduct(product);
                       const name = resolveDisplayName({ productKey: catalogEntry?.productKey, stripePriceId: product.stripe_price_id, fallbackName: product.name });
@@ -358,7 +389,7 @@ const Pricing: React.FC<PricingProps> = ({
             })}
           </div>
         ) : (
-          <div className="text-center py-12 px-6 rounded-sm border border-nano-border bg-nano-panel/40 max-w-3xl mx-auto text-nano-text">
+          <div className="text-center py-12 px-6 rounded-2xl border border-nano-border bg-nano-panel/40 max-w-3xl mx-auto text-nano-text">
             No active products found. Configure your products in Supabase.
           </div>
         )}

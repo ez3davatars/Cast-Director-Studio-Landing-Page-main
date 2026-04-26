@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://castdirectorstudio.com/sitemap.xml

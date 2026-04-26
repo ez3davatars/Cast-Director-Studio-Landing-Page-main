@@ -2,15 +2,156 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background-color: #020617;
-  color: #ffffff;
+@layer base {
+  body {
+    /* Base near-black/deep navy - cinematic depth */
+    @apply bg-[#030712] text-white antialiased selection:bg-nano-yellow/30;
+  }
 }
-.scanner-line {
-  box-shadow: 0 0 15px 2px rgba(250, 204, 21, 0.5);
+
+@layer utilities {
+  .scanner-line {
+    box-shadow: 0 0 15px 2px rgba(250, 204, 21, 0.5);
+  }
+
+  /* ─── Premium Surface Classes ─── */
+  
+  .glass-panel {
+    @apply bg-white/[0.03] backdrop-blur-md border border-white/10 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.5)];
+  }
+
+  .glass-panel-premium {
+    @apply bg-[#0f172a]/60 backdrop-blur-lg border border-[#1e293b]/80 shadow-[0_8px_32px_-8px_rgba(0,0,0,0.6)];
+  }
+
+  .glass-panel-elite {
+    @apply bg-gradient-to-b from-[#1e293b]/40 to-[#020617]/80 backdrop-blur-xl border border-white/10 shadow-[0_16px_64px_-12px_rgba(0,0,0,0.8)] relative overflow-hidden;
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 16px 64px -12px rgba(0, 0, 0, 0.8);
+  }
+
+  .premium-chip {
+    @apply bg-black/30 border border-white/5 backdrop-blur-sm shadow-inner;
+  }
+
+  /* ─── Section Atmosphere ─── */
+
+  .hero-atmosphere {
+    background:
+      radial-gradient(ellipse 70% 50% at 50% 20%, rgba(245, 158, 11, 0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 100% 80% at 50% 0%, rgba(15, 23, 42, 0.4) 0%, transparent 80%),
+      radial-gradient(ellipse 120% 100% at 50% 100%, rgba(2, 6, 23, 0.95) 0%, transparent 60%);
+  }
+
+  .radial-glow-hero {
+    background: radial-gradient(circle at top center, rgba(30, 58, 138, 0.15) 0%, rgba(2, 6, 23, 0) 70%);
+  }
+
+  /* ─── Dividers ─── */
+
+  .section-divider-warm {
+    @apply h-[1px] w-full;
+    background: linear-gradient(90deg, transparent 0%, rgba(245, 158, 11, 0.2) 30%, rgba(250, 204, 21, 0.3) 50%, rgba(245, 158, 11, 0.2) 70%, transparent 100%);
+  }
+
+  .section-divider-cool {
+    @apply h-[1px] w-full;
+    background: linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.1) 30%, rgba(148, 163, 184, 0.08) 50%, rgba(59, 130, 246, 0.1) 70%, transparent 100%);
+  }
+
+  /* ─── Textures ─── */
+
+  .grid-texture {
+    background-size: 40px 40px;
+    background-image: linear-gradient(to right, rgba(255,255,255,0.015) 1px, transparent 1px),
+                      linear-gradient(to bottom, rgba(255,255,255,0.015) 1px, transparent 1px);
+  }
+
+  .cinematic-texture {
+    background-image: radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .surface-noise {
+    background-image: 
+      radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      radial-gradient(rgba(255,255,255,0.015) 1px, transparent 1px);
+    background-size: 24px 24px, 16px 16px;
+    background-position: 0 0, 8px 8px;
+  }
+
+  .cinematic-vignette {
+    box-shadow: inset 0 0 200px rgba(0, 0, 0, 0.95), inset 0 0 400px rgba(10, 5, 0, 0.3);
+  }
+
+  /* ─── Card Treatments ─── */
+
+  .card-spotlight {
+    background: radial-gradient(ellipse at 50% 0%, rgba(250, 204, 21, 0.04) 0%, transparent 70%);
+  }
+
+  .editorial-accent-left {
+    @apply border-l-2 border-nano-yellow/30;
+  }
+
+  .editorial-accent-top-blue {
+    @apply border-t-2 border-blue-500/30;
+  }
+
+  .editorial-accent-top-purple {
+    @apply border-t-2 border-purple-500/30;
+  }
+
+  /* ─── Scanline Effect ─── */
+
+  .scanline-overlay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, transparent 0%, rgba(250, 204, 21, 0.03) 50%, transparent 100%);
+    height: 4px;
+    width: 100%;
+    animation: scanline 8s linear infinite;
+    pointer-events: none;
+    z-index: 5;
+  }
 }
-.glass-panel {
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(30, 41, 59, 0.5);
+
+/* ─── Scroll Reveal Animations ─── */
+/* Placed outside @layer to ensure higher specificity than Tailwind utilities */
+
+[data-reveal] {
+  opacity: 0 !important;
+  will-change: transform, opacity;
+  transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 1s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+[data-reveal="up"] {
+  transform: translateY(32px);
+}
+
+[data-reveal="left"] {
+  transform: translateX(-40px);
+}
+
+[data-reveal="right"] {
+  transform: translateX(40px);
+}
+
+[data-reveal="scale"] {
+  transform: scale(0.95);
+}
+
+[data-reveal].revealed {
+  opacity: 1 !important;
+  transform: translateY(0) translateX(0) scale(1);
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
 }

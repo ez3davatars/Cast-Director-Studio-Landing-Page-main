@@ -3,9 +3,13 @@ import { Session } from '@supabase/supabase-js';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
+import LaunchAdvantage from './components/LaunchAdvantage';
+import DigitalDoubles from './components/DigitalDoubles';
 import Workflow from './components/Workflow';
+import CharacterSheets from './components/CharacterSheets';
 import TechSpecs from './components/TechSpecs';
 import Pricing from './components/Pricing';
+import FaqSection from './components/FaqSection';
 import Footer from './components/Footer';
 import AuthModal from './components/AuthModal';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -23,6 +27,15 @@ import CustomerDetailAdmin from './pages/admin/CustomerDetail';
 import InboxAdmin from './pages/admin/Inbox';
 import Success from './pages/Success';
 import DownloadHandler from './pages/DownloadHandler';
+import Documentation from './pages/Documentation';
+import Tutorials from './pages/Tutorials';
+import Community from './pages/Community';
+import Terms from './pages/Terms';
+import Privacy from './pages/Privacy';
+import FaceReference from './pages/FaceReference';
+import About from './pages/About';
+import Careers from './pages/Careers';
+import Contact from './pages/Contact';
 import { supabase } from './lib/supabase';
 
 function App() {
@@ -68,14 +81,24 @@ function App() {
   }
 
   const LandingPage = (
-    <>
-      <Navbar session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
-      <Hero />
-      <Workflow />
-      <TechSpecs />
-      <Pricing session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
-      <Footer />
-    </>
+    <div className="relative min-h-screen bg-nano-abyss cinematic-vignette overflow-hidden">
+      {/* Global ultra-low opacity texture */}
+      <div className="absolute inset-0 cinematic-texture opacity-25 pointer-events-none mix-blend-screen"></div>
+      
+      {/* Page Content Layer */}
+      <div className="relative z-10">
+        <Navbar session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
+        <Hero />
+        <LaunchAdvantage />
+        <DigitalDoubles />
+        <Workflow />
+        <CharacterSheets />
+        <TechSpecs />
+        <Pricing session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
+        <FaqSection />
+        <Footer />
+      </div>
+    </div>
   );
 
   return (
@@ -128,6 +151,17 @@ function App() {
           <Route path="inbox" element={<InboxAdmin />} />
         </Route>
         
+        {/* Content Pages */}
+        <Route path="/docs" element={<Documentation />} />
+        <Route path="/tutorials" element={<Tutorials />} />
+        <Route path="/community" element={<Community />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/face-reference" element={<FaceReference />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/careers" element={<Careers />} />
+        <Route path="/contact" element={<Contact />} />
+
         {/* Catch-all route to prevent blank screens if the user types an invalid URL */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -37,21 +37,21 @@ const Navbar: React.FC<NavbarProps> = ({
   return (
     <header
       className={`sticky top-0 z-50 transition-all duration-300 ${isScrolled
-          ? 'bg-black/80 backdrop-blur-md border-b border-nano-border'
+          ? 'bg-nano-abyss/90 backdrop-blur-xl border-b border-nano-border'
           : 'bg-transparent'
         }`}
     >
-      <div className="container mx-auto px-6">
-        <div className="flex items-center justify-between h-20">
+      <div className="container mx-auto px-6 max-w-[1400px]">
+        <div className="flex items-center justify-between h-[88px]">
           <a href="#" className="flex items-center gap-3">
             <div className="relative w-12 h-12 flex items-center justify-center">
                 <img src="/logo.png" alt="EZ3D Logo" className="w-full h-full object-contain drop-shadow-[0_0_8px_rgba(250,204,21,0.4)]" />
             </div>
             <div className="flex flex-col leading-tight">
-              <span className="font-mono text-white text-xl font-bold tracking-wider uppercase">
+              <span className="font-mono font-bold text-2xl tracking-tight text-white">
                 Cast Director Studio
               </span>
-              <span className="text-[10px] uppercase tracking-widest text-nano-text">
+              <span className="text-[10px] uppercase tracking-widest text-slate-400 font-medium mt-0.5">
                 Powered by Nanobanana 2
               </span>
             </div>
@@ -62,7 +62,7 @@ const Navbar: React.FC<NavbarProps> = ({
               <a
                 key={link.name}
                 href={link.href}
-                className="text-sm uppercase tracking-wide text-nano-text hover:text-white transition-colors"
+                className="text-[13px] font-semibold uppercase tracking-[0.1em] text-slate-400 hover:text-white transition-colors"
               >
                 {link.name}
               </a>
@@ -79,13 +79,13 @@ const Navbar: React.FC<NavbarProps> = ({
 
             {session ? (
               <div className="flex items-center gap-3">
-                <span className="text-xs text-nano-text max-w-[220px] truncate">
+                <span className="text-xs text-slate-400 max-w-[220px] truncate font-medium">
                   {session.user.email}
                 </span>
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className="px-4 py-2 border border-nano-border text-white text-sm uppercase tracking-wide hover:bg-white/10 transition-colors"
+                  className="px-5 py-2.5 rounded-full border border-white/10 text-white text-[13px] font-semibold uppercase tracking-wide hover:bg-white/5 transition-colors"
                 >
                   Sign Out
                 </button>
@@ -95,14 +95,14 @@ const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={onSignIn}
-                  className="px-4 py-2 border border-nano-border text-white text-sm uppercase tracking-wide hover:bg-white/10 transition-colors"
+                  className="px-5 py-2.5 rounded-full border border-transparent text-white text-[13px] font-semibold uppercase tracking-wide hover:bg-white/5 transition-colors"
                 >
                   Sign In
                 </button>
                 <button
                   type="button"
                   onClick={onCreateAccount}
-                  className="px-5 py-2 bg-nano-yellow text-black text-sm font-bold uppercase tracking-wide hover:bg-nano-gold transition-colors"
+                  className="px-6 py-2.5 rounded-full bg-nano-yellow text-black text-[13px] font-bold uppercase tracking-wide hover:bg-[#eab308] hover:shadow-[0_0_15px_rgba(250,204,21,0.2)] transition-all ring-1 ring-nano-yellow/20"
                 >
                   Create Account
                 </button>
