@@ -12,7 +12,8 @@ import {
   Users,
   LogOut,
   ChevronLeft,
-  Inbox
+  Inbox,
+  MessageSquare
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -41,6 +42,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
   ];
 
   const phase3Items = [
+    { name: 'Contact Leads', path: '/admin/leads', icon: <MessageSquare size={18} /> },
     { name: 'Support Inbox', path: '/admin/inbox', icon: <Inbox size={18} /> },
   ];
 
@@ -98,28 +100,38 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
             </NavLink>
           ))}
           
+          <div className="text-xs font-bold text-nano-text uppercase tracking-widest mt-6 mb-2 px-2">
+            Phase 3
+          </div>
+          {/* Contact Leads — always visible */}
+          <NavLink
+            to="/admin/leads"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`
+            }
+          >
+            <MessageSquare size={18} />
+            <span className="font-medium text-sm">Contact Leads</span>
+          </NavLink>
+          {/* Support Inbox — feature-flagged */}
           {import.meta.env.VITE_INBOUND_EMAIL_ENABLED === 'true' && (
-            <>
-              <div className="text-xs font-bold text-nano-text uppercase tracking-widest mt-6 mb-2 px-2">
-                Phase 3
-              </div>
-              {phase3Items.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
-                      isActive
-                        ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`
-                  }
-                >
-                  {item.icon}
-                  <span className="font-medium text-sm">{item.name}</span>
-                </NavLink>
-              ))}
-            </>
+            <NavLink
+              to="/admin/inbox"
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                  isActive
+                    ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`
+              }
+            >
+              <Inbox size={18} />
+              <span className="font-medium text-sm">Support Inbox</span>
+            </NavLink>
           )}
         </nav>
 

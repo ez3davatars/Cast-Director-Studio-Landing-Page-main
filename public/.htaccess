@@ -1,3 +1,6 @@
+# ── Resend API Key (replace with your real key) ──
+SetEnv RESEND_API_KEY "re_REPLACE_WITH_YOUR_RESEND_API_KEY"
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /

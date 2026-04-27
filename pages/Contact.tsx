@@ -83,9 +83,13 @@ export default function Contact() {
       if (licenseType.trim()) payload.licenseType = licenseType.trim();
       if (orderEmail.trim()) payload.orderEmail = orderEmail.trim();
 
-      const res = await fetch('/send-cds-contact.php', {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/contact-form-submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
         body: JSON.stringify(payload),
       });
 

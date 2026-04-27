@@ -62,7 +62,7 @@ serve(async (req: any) => {
       body: JSON.stringify({
         from: 'EZ3D Avatars <sales@castdirectorstudio.com>',
         to: [to],
-        reply_to: 'support@castdirectorstudio.com',
+        reply_to: 'support@inbox.castdirectorstudio.com',
         subject: subject,
         text: body,
       })

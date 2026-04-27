@@ -2,3 +2,6 @@ project_id = "wtgkeytabshxtspjoegb"
 
 [functions.create-checkout-session]
 verify_jwt = false
+
+[functions.contact-form-submit]
+verify_jwt = false
