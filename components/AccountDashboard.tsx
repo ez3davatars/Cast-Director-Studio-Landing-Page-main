@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import SupportTickets from './SupportTickets';
 import ClaimPurchasesModal from './ClaimPurchasesModal';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -504,6 +505,11 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     </div>
 
                                 </div>
+                            </div>
+
+                            {/* Support Tickets — Full Width */}
+                            <div className="mt-8">
+                                <SupportTickets session={session} />
                             </div>
                         </>
                     )}

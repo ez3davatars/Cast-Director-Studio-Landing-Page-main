@@ -246,7 +246,7 @@ serve(async (req: any) => {
 
     // ── CRM save succeeded — now send emails ──
     const when = new Date().toISOString();
-    const fromAddr = 'Cast Director Studio <support@castdirectorstudio.com>';
+    const fromAddr = 'Cast Director Studio Support <support@castdirectorstudio.com>';
     const adminTo = 'support@castdirectorstudio.com';
 
     // Admin notification (REQUIRED — failure = warning but CRM record kept)

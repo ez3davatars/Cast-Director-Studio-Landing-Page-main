@@ -65,6 +65,9 @@ const LeadsAdmin: React.FC = () => {
   const [statusModal, setStatusModal] = useState<{ convoId: string; newStatus: string; contactId: string; contactEmail: string; contactName: string; ticketId: string } | null>(null);
   const [autoSendEnabled, setAutoSendEnabled] = useState(true);
   const [sendingStatus, setSendingStatus] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [isReplying, setIsReplying] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const fetchLeads = async () => {
@@ -228,6 +231,61 @@ const LeadsAdmin: React.FC = () => {
   const contact = selected?.contact;
   const isRegistered = !!(contact?.user_id || selected?.linked_user_id);
   const sortedMessages = selected?.messages?.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) || [];
+  
+  const handleSendReply = async () => {
+    if (!replyText.trim() || !selected) return;
+    setIsReplying(true);
+    setReplyError(null);
+
+    try {
+      const { data, error: funcErr } = await supabase.functions.invoke('admin-crm-reply', {
+        body: {
+          conversation_id: selected.id,
+          ticket_id: selected.ticket_id,
+          recipient_email: selected.contact?.email,
+          reply_text: replyText
+        }
+      });
+
+      if (funcErr) throw new Error(funcErr.message || 'Failed to invoke edge function');
+      if (data?.error) throw new Error(data.error);
+      
+      const newMsg = data?.message;
+      if (!newMsg) throw new Error('Reply succeeded but no message was returned');
+
+      // Optimistically add message to current selection
+      setSelected(prev => {
+        if (!prev) return prev;
+        const updatedStatus = prev.status === 'new' ? 'open' : prev.status;
+        return {
+          ...prev,
+          status: updatedStatus,
+          messages: [...prev.messages, newMsg]
+        };
+      });
+
+      // Update global conversations list as well
+      setConversations(prev => prev.map(c => {
+        if (c.id === selected.id) {
+          const updatedStatus = c.status === 'new' ? 'open' : c.status;
+          return {
+            ...c,
+            status: updatedStatus,
+            messages: [...c.messages, newMsg]
+          };
+        }
+        return c;
+      }));
+
+      setReplyText('');
+    } catch (e: any) {
+      console.error("Admin CRM reply failed:", e);
+      setReplyError(e.message || 'Failed to dispatch reply. Check logs.');
+    } finally {
+      setIsReplying(false);
+    }
+  };
+
   const canDeleteSelected = selected && (selected.status === 'resolved' || selected.status === 'closed');
   const textSize = TEXT_SIZES[textSizeIdx];
 
@@ -389,12 +447,28 @@ const LeadsAdmin: React.FC = () => {
                       <div className="text-sm text-nano-yellow font-mono mt-0.5">{contact?.email}</div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
+                      {isRegistered ? (
+                        <button
+                          onClick={() => {
+                            const targetEmail = contact?.email || selected.sender_email;
+                            if (targetEmail) navigate(`/admin/customers/${targetEmail}`);
+                          }}
+                          className="text-[10px] uppercase font-bold text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
+                        >
+                          <User size={12} /> Registered Customer
+                          <ExternalLink size={10} className="ml-1" />
+                        </button>
+                      ) : (
+                        <div className="text-[10px] uppercase font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded flex items-center gap-1.5">
+                          <UserX size={12} /> Unregistered Lead
+                        </div>
+                      )}
                       {/* Delete button for resolved/closed */}
                       {canDeleteSelected && (
                         <button
                           onClick={() => handleDeleteSingle(selected.id)}
                           disabled={deleting}
-                          className="p-2 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                          className="p-1.5 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
                           title="Delete this ticket"
                         >
                           <Trash2 size={14} />
@@ -405,7 +479,7 @@ const LeadsAdmin: React.FC = () => {
                         <select
                           value={selected.status}
                           onChange={(e) => initiateStatusChange(selected.id, e.target.value)}
-                          className="appearance-none bg-black border border-nano-border text-white text-xs font-bold uppercase tracking-wider px-3 py-2 pr-7 rounded cursor-pointer focus:outline-none focus:border-nano-yellow transition-colors"
+                          className="appearance-none bg-black border border-nano-border text-white text-xs font-bold uppercase tracking-wider px-3 py-1.5 pr-7 rounded cursor-pointer focus:outline-none focus:border-nano-yellow transition-colors"
                         >
                           {STATUS_OPTIONS.map(s => (
                             <option key={s} value={s} className="bg-black">{s}</option>
@@ -439,24 +513,7 @@ const LeadsAdmin: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2 mt-1">
-                    {isRegistered ? (
-                      <button
-                        onClick={() => {
-                          const userId = contact?.user_id || selected.linked_user_id;
-                          if (userId) navigate(`/admin/customers/${userId}`);
-                        }}
-                        className="text-[10px] uppercase font-bold text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
-                      >
-                        <User size={12} /> Registered Customer
-                        <ExternalLink size={10} className="ml-1" />
-                      </button>
-                    ) : (
-                      <div className="text-[10px] uppercase font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded flex items-center gap-1.5">
-                        <UserX size={12} /> Unregistered Lead
-                      </div>
-                    )}
-                  </div>
+
                 </div>
 
                 {/* Message thread */}
@@ -513,6 +570,38 @@ const LeadsAdmin: React.FC = () => {
                     </div>
                   ) : (
                     <div className="text-gray-500 font-mono text-xs italic">No messages in this conversation.</div>
+                  )}
+                </div>
+
+                {/* Reply Box UI */}
+                <div className="p-6 border-t border-nano-border bg-nano-bg flex flex-col gap-3">
+                  {replyError && (
+                    <div className="text-red-500 bg-red-500/10 border border-red-500/30 p-3 rounded font-mono text-xs">
+                      Failed to send: {replyError}
+                    </div>
+                  )}
+                  <div className="flex items-stretch gap-3">
+                    <textarea
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      disabled={isReplying}
+                      placeholder="Type a response to this user..."
+                      className="flex-1 bg-black border border-nano-border text-white text-sm font-sans p-4 rounded-lg focus:outline-none focus:border-nano-yellow transition-colors resize-none disabled:opacity-50 min-h-[60px]"
+                      rows={2}
+                    />
+                    <button
+                      onClick={handleSendReply}
+                      disabled={isReplying || !replyText.trim() || !selected.contact?.email}
+                      className="px-6 bg-nano-yellow text-black text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-yellow-400 transition-colors disabled:opacity-50 flex items-center gap-2 h-auto"
+                    >
+                      {isReplying ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                      {isReplying ? 'Dispatching...' : 'Send Reply'}
+                    </button>
+                  </div>
+                  {!selected.contact?.email && (
+                    <div className="text-right text-[10px] text-red-500 font-mono mt-1">
+                      Cannot reply: User lacks email address.
+                    </div>
                   )}
                 </div>
               </>

@@ -63,11 +63,13 @@ const CustomerDetailAdmin: React.FC = () => {
 
       try {
         // 1. Fetch Contact Core (Fail-soft required)
-        const { data: contactData, error: contactErr } = await supabase
-          .from('contacts')
-          .select('id, email, created_at')
-          .eq('id', id)
-          .single();
+        let contactQuery = supabase.from('contacts').select('id, email, created_at');
+        if (id?.includes('@')) {
+          contactQuery = contactQuery.eq('email', id);
+        } else {
+          contactQuery = contactQuery.eq('id', id);
+        }
+        const { data: contactData, error: contactErr } = await contactQuery.single();
 
         if (contactErr) throw contactErr;
         
@@ -77,7 +79,7 @@ const CustomerDetailAdmin: React.FC = () => {
           const { data: stripeData, error: stripeErr } = await supabase
              .from('contacts')
              .select('stripe_customer_id')
-             .eq('id', id)
+             .eq('id', contactData.id)
              .single();
           if (!stripeErr && stripeData) stripeCustomerId = stripeData.stripe_customer_id;
         } catch (e) {
@@ -115,7 +117,7 @@ const CustomerDetailAdmin: React.FC = () => {
         const emailsPromise = supabase
           .from('email_sends')
           .select('id, subject, provider_message_id, created_at, contact_id')
-          .eq('contact_id', id)
+          .eq('contact_id', contactData.id)
           .order('created_at', { ascending: false });
 
         // Phase 7: Global Products Dictionary
