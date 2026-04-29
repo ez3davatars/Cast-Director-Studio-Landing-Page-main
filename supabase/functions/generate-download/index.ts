@@ -58,6 +58,14 @@ serve(async (req: Request) => {
         }
     }
 
+    // 4b. Validate Download Limits
+    if (download.max_downloads !== null && download.max_downloads !== undefined && download.download_count >= download.max_downloads) {
+        return new Response(
+            JSON.stringify({ error: "limit_reached", message: "This download link has reached its maximum allowed downloads." }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+    }
+
     // 5. Explicit Missing Installer Handling
     const product = download.product || {};
     const installerObjectKey = product.installer_object_key;
@@ -101,6 +109,12 @@ serve(async (req: Request) => {
 
     // Generate strict short-lived 5 minute URL
     const targetUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
+
+    // Increment download tracking
+    await supabaseAdmin
+        .from('downloads')
+        .update({ download_count: (download.download_count || 0) + 1 })
+        .eq('id', download_id);
 
     // 7. Success - Hand back the presigned URL boundary securely.
     return new Response(

@@ -251,7 +251,18 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     };
 
     useEffect(() => {
-        loadDashboard();
+        // Safety net: silently invoke claim-purchases on mount to link any
+        // pending guest purchases to this authenticated user before loading data.
+        const claimAndLoad = async () => {
+            try {
+                await supabase.functions.invoke('claim-purchases', { body: {} });
+            } catch (err) {
+                // Non-blocking — claim is a best-effort safety net
+                console.warn('[Dashboard] claim-purchases safety net failed:', err);
+            }
+            loadDashboard();
+        };
+        claimAndLoad();
     }, [session.user.id, session.user.email]);
 
     return (

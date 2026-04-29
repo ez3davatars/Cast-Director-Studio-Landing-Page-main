@@ -19,155 +19,207 @@ serve(async (req: Request) => {
   }
 
   try {
-    // 1. Initialize User-Bound Supabase Client
-    // This allows us to securely interact with the DB acting exactly as the authenticated user.
-    const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      {
-        auth: {
-          persistSession: false,
-        },
-        global: {
-          headers: { Authorization: req.headers.get("Authorization")! },
-        },
+    // ──────────────────────────────────────────────────
+    // 1. PARSE REQUEST BODY FIRST (needed to check guestCheckout flag)
+    // ──────────────────────────────────────────────────
+    const { priceId, successUrl, cancelUrl, allowDuplicatePurchase, guestCheckout } = await req.json();
+
+    // ──────────────────────────────────────────────────
+    // 2. DETERMINE CHECKOUT MODE: Authenticated vs Guest
+    //    - guestCheckout === true → skip JWT, proceed as guest
+    //    - guestCheckout !== true → validate JWT strictly, 401 on failure
+    // ──────────────────────────────────────────────────
+    const authHeader = req.headers.get("Authorization");
+    let user = null;
+    let isGuestCheckout = guestCheckout === true;
+
+    if (!isGuestCheckout) {
+      // Authenticated path: require valid JWT
+      const supabaseClient = createClient(
+        Deno.env.get("SUPABASE_URL") ?? "",
+        Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+        {
+          auth: { persistSession: false },
+          global: { headers: { Authorization: authHeader! } },
+        }
+      );
+
+      const { data: { user: authUser }, error: userError } = await supabaseClient.auth.getUser();
+
+      if (userError || !authUser) {
+        // Invalid JWT → hard 401
+        return new Response(JSON.stringify({
+          error: "Unauthorized access or missing valid JWT token",
+          code: "unauthorized",
+          message: "Unauthorized access or missing valid JWT token",
+          details: userError
+        }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
-    );
 
-    // 2. Read Authenticated User directly from the incoming JWT Authorization Header
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseClient.auth.getUser();
-
-    if (userError || !user) {
-      // Intentionally surfacing 401 if the JWT was somehow bypassed, tampered, or expired.
-      return new Response(JSON.stringify({ error: "Unauthorized access or missing valid JWT token", code: "unauthorized", message: "Unauthorized access or missing valid JWT token", details: userError }), {
-        status: 401, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      user = authUser;
     }
-
-    // 3. Validate Request Payload
-    const { priceId, successUrl, cancelUrl, allowDuplicatePurchase } = await req.json();
 
     if (!priceId) {
       return new Response(JSON.stringify({ error: "Missing required metadata: stripe_price_id", code: "bad_request", message: "Missing required metadata: stripe_price_id" }), {
-        status: 400, // 400 Bad Request
+        status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     if (!Deno.env.get("STRIPE_SECRET_KEY")) {
       return new Response(JSON.stringify({ error: "Backend Configuration Error", code: "server_configuration_error", message: "Missing STRIPE_SECRET_KEY" }), {
-        status: 500, // Explicitly surfacing missing keys as 500, not 401
+        status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // 4. Initialize Service Role Client for administrative lookups bypassing RLS constraint paths
-    // We only use this when absolutely necessary (e.g. cross-referencing global contacts).
+    // 3. Initialize Service Role Client for administrative lookups
     const supabaseAdmin = createClient(
         Deno.env.get("SUPABASE_URL") ?? "",
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    // 4b. Backend Duplicate Guard
+    // 4. Resolve product metadata for session params
     const { data: product } = await supabaseAdmin.from('products').select('id, name, product_key').eq('stripe_price_id', priceId).maybeSingle();
-    
-    if (product) {
-       const { data: activeLicenses } = await supabaseAdmin.from('licenses')
-           .select('*, products ( name )')
-           .eq('user_id', user.id)
-           .ilike('status', 'active');
-           
-       const hasActiveLicense = activeLicenses?.some((l: any) => {
-           const pName = product.name || '';
-           const ownedName = (l.license_name || l.products?.name || '').toLowerCase().trim();
-           const targetName = pName.toLowerCase().trim();
-           
-           return l.product_id === product.id || 
-                  l.stripe_price_id === priceId ||
-                  (ownedName && targetName && ownedName === targetName);
-       });
-           
-       const { data: activeSubs } = await supabaseAdmin.from('subscriptions')
-           .select('id').eq('user_id', user.id).ilike('status', 'active').eq('metadata->>stripe_price_id', priceId).limit(1);
+    const productKey = product?.product_key || "unknown";
 
-       if (hasActiveLicense || (activeSubs && activeSubs.length > 0)) {
-           // We found an active overlap. Check override intent.
-           if (allowDuplicatePurchase !== true) {
-               return new Response(JSON.stringify({ 
-                   error: "duplicate_purchase",
-                   code: "duplicate_purchase",
-                   message: `You already own an active license or subscription for ${product.name || 'this product'}.`,
-                   productKey: product.product_key,
-                   productName: product.name,
-                   reason: "active_license_exists"
-               }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-           }
-       }
-    }
+    // Determine success type from product
+    let successType = 'byok';
+    const productType = (product?.product_key || '').toLowerCase();
+    if (productType.includes('starter') || productType.includes('pro')) successType = 'hosted';
+    else if (productType.includes('updates') || productType.includes('support')) successType = 'renewal';
 
-    // 5. Safely Recover or Bind Stripe Customer Metadata
-    const { data: contact } = await supabaseAdmin
-      .from("contacts")
-      .select("stripe_customer_id")
-      .eq("email", user.email)
-      .maybeSingle();
+    // ──────────────────────────────────────────────────
+    // AUTHENTICATED CHECKOUT PATH
+    // ──────────────────────────────────────────────────
+    if (!isGuestCheckout && user) {
+      // 4b. Backend Duplicate Guard (authenticated only)
+      if (product) {
+        const { data: activeLicenses } = await supabaseAdmin.from('licenses')
+            .select('*, products ( name )')
+            .eq('user_id', user.id)
+            .ilike('status', 'active');
+            
+        const hasActiveLicense = activeLicenses?.some((l: any) => {
+            const pName = product.name || '';
+            const ownedName = (l.license_name || l.products?.name || '').toLowerCase().trim();
+            const targetName = pName.toLowerCase().trim();
+            
+            return l.product_id === product.id || 
+                   l.stripe_price_id === priceId ||
+                   (ownedName && targetName && ownedName === targetName);
+        });
+            
+        const { data: activeSubs } = await supabaseAdmin.from('subscriptions')
+            .select('id').eq('user_id', user.id).ilike('status', 'active').eq('metadata->>stripe_price_id', priceId).limit(1);
 
-    let customerId = contact?.stripe_customer_id;
+        if (hasActiveLicense || (activeSubs && activeSubs.length > 0)) {
+            if (allowDuplicatePurchase !== true) {
+                return new Response(JSON.stringify({ 
+                    error: "duplicate_purchase",
+                    code: "duplicate_purchase",
+                    message: `You already own an active license or subscription for ${product.name || 'this product'}.`,
+                    productKey: product.product_key,
+                    productName: product.name,
+                    reason: "active_license_exists"
+                }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }
+        }
+      }
 
-    if (!customerId) {
-      // Create a new Stripe Customer expressly configured with this verified user's ID
-      const customer = await stripe.customers.create({
-        email: user.email,
+      // 5. Stripe Customer Resolution (authenticated)
+      const { data: contact } = await supabaseAdmin
+        .from("contacts")
+        .select("stripe_customer_id")
+        .eq("email", user.email)
+        .maybeSingle();
+
+      let customerId = contact?.stripe_customer_id;
+
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          metadata: { supabase_user_id: user.id },
+        });
+        customerId = customer.id;
+        
+        await supabaseAdmin.from("contacts").upsert({
+          email: user.email,
+          stripe_customer_id: customerId,
+          user_id: user.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'email' });
+      }
+
+      // 6. Create Authenticated Stripe Checkout Session
+      const price = await stripe.prices.retrieve(priceId);
+      const mode = price.type === 'recurring' ? 'subscription' : 'payment';
+
+      const sessionParams: any = {
+        customer: customerId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        mode: mode,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        client_reference_id: user.id,
         metadata: {
-          supabase_user_id: user.id,
+          user_id: user.id,
+          checkout_mode: "authenticated",
+          product_key: productKey,
+          price_id: priceId,
+          success_type: successType,
         },
+      };
+
+      if (mode === 'subscription') {
+        sessionParams.subscription_data = {
+            metadata: { user_id: user.id }
+        };
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionParams);
+
+      return new Response(JSON.stringify({ url: session.url }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
-      customerId = customer.id;
-      
-      // Upsert the new mapping back into the backend using the isolated Service Role
-      await supabaseAdmin.from("contacts").upsert({
-        email: user.email,
-        stripe_customer_id: customerId,
-        user_id: user.id,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'email' });
     }
 
-    // 6. Execute Stripe Checkout explicitly linking the payload payload
+    // ──────────────────────────────────────────────────
+    // GUEST CHECKOUT PATH
+    // ──────────────────────────────────────────────────
     const price = await stripe.prices.retrieve(priceId);
     const mode = price.type === 'recurring' ? 'subscription' : 'payment';
 
-    const sessionParams: any = {
-      customer: customerId,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
+    const guestSessionParams: any = {
+      // No customer pre-set — Stripe collects email natively
+      line_items: [{ price: priceId, quantity: 1 }],
       mode: mode,
       success_url: successUrl,
       cancel_url: cancelUrl,
-      client_reference_id: user.id,
+      // No client_reference_id — no user yet
+      // No user_id in metadata
       metadata: {
-        user_id: user.id,
+        checkout_mode: "guest",
+        product_key: productKey,
+        price_id: priceId,
+        success_type: successType,
       },
     };
 
     if (mode === 'subscription') {
-      sessionParams.subscription_data = {
-          metadata: {
-              user_id: user.id,
-          }
+      guestSessionParams.subscription_data = {
+        metadata: {
+          checkout_mode: "guest",
+          product_key: productKey,
+        }
       };
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
+    const session = await stripe.checkout.sessions.create(guestSessionParams);
 
     return new Response(JSON.stringify({ url: session.url }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -175,10 +227,9 @@ serve(async (req: Request) => {
 
   } catch (err: any) {
     if (err.raw?.statusCode === 401 || err.statusCode === 401 || err.type === "StripeAuthenticationError") {
-       // STRIPE IS RETURNING 401
        console.error("CRITICAL: Stripe API rejected the backend request! 401 Unauthorized.");
        return new Response(JSON.stringify({ error: "Stripe API Error", code: "stripe_auth_error", message: "Stripe API Key Invalid or Missing Permissions" }), {
-         status: 500, // Rebranding remote 401 to local 500 so frontend doesn't falsely drop the user's session
+         status: 500,
          headers: { ...corsHeaders, "Content-Type": "application/json" },
        });
     }

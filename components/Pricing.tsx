@@ -5,6 +5,68 @@ import DuplicatePurchaseModal from './DuplicatePurchaseModal';
 import { getProductByKey, getProductByStripePriceId, resolveCatalogEntryFromDbProduct, resolveDisplayName } from '../lib/products';
 import { supabase } from '../lib/supabase';
 
+/* ── Fallback prices shown when live pricing data is unavailable ── */
+const FALLBACK_PRICES: Record<string, { displayPrice: string; interval: string; billingSuffix: string }> = {
+  starter:                { displayPrice: '$29',  interval: 'month', billingSuffix: '/month' },
+  pro:                    { displayPrice: '$99',  interval: 'month', billingSuffix: '/month' },
+  indie_desktop_byok:     { displayPrice: '$199', interval: '',      billingSuffix: ' one-time' },
+  agency_desktop_byok:    { displayPrice: '$699', interval: '',      billingSuffix: ' one-time' },
+  indie_updates_support:  { displayPrice: '$79',  interval: 'year',  billingSuffix: '/year' },
+  agency_updates_support: { displayPrice: '$199', interval: 'year',  billingSuffix: '/year' },
+};
+
+/* ── Authoritative feature lists per plan ──
+   These override DB features to avoid implying feature gating the app
+   does not actually enforce. Core creative features are the same across
+   all plans — the real difference is usage/credits and licensing model. */
+const PLAN_FEATURES: Partial<Record<string, string[]>> = {
+  starter: [
+    'Desktop Application Access',
+    'Full Creator Workflow Access',
+    'Hosted Processing, Temporary Delivery',
+    'Monthly Generation Credits: 200',
+    'Device Activations: 2',
+    'Commercial Use Included',
+    'Standard Support',
+    'Best for light creator use',
+  ],
+  pro: [
+    'Desktop Application Access',
+    'Full Creator Workflow Access',
+    'Hosted Processing, Temporary Delivery',
+    'Monthly Generation Credits: 1,000',
+    'Device Activations: 2',
+    'Commercial Use Included',
+    'Standard Support',
+    'Best for higher-volume creators',
+  ],
+  indie_desktop_byok: [
+    'Desktop Application Access',
+    'Full Creator Workflow Access',
+    'BYOK API Access',
+    'Use Your Own AI Provider/API Key',
+    'Device Activation: 1',
+    'Perpetual License',
+    'Updates Included: 12 Months',
+    'Commercial Use Included',
+    'Standard Support',
+    'Best for independent creators',
+  ],
+  agency_desktop_byok: [
+    'Desktop Application Access',
+    'Full Creator Workflow Access',
+    'BYOK API Access',
+    'Use Your Own AI Provider/API Key',
+    'Device Activations: 3',
+    'Perpetual License',
+    'Updates Included: 12 Months',
+    'Commercial Use Included',
+    'Agency / Client Work Use',
+    'Priority Support',
+    'Best for studios, teams, and client work',
+  ],
+};
+
 interface PricingProps {
   session: Session | null;
   onCreateAccount: () => void;
@@ -174,7 +236,7 @@ const Pricing: React.FC<PricingProps> = ({
           else if (catalogEntry.productType === 'desktop_license') successType = 'byok';
       }
 
-      const returnUrl = `${window.location.origin}/success/${successType}`;
+      const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
       
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: { 
@@ -209,6 +271,64 @@ const Pricing: React.FC<PricingProps> = ({
     } catch (err: any) {
       console.error("Checkout launch failed:", err);
       setCheckoutError(err.message || "An unexpected error occurred during checkout initialization.");
+    } finally {
+      if (!window.location.href.includes('stripe')) setCheckingOutProductId(null);
+    }
+  };
+
+  /* ── Guest Checkout: no auth required ── */
+  const executeGuestCheckout = async (product: any) => {
+    setCheckingOutProductId(product.id);
+    setCheckoutError(null);
+
+    try {
+      let successType = 'byok';
+      const catalogEntry = resolveCatalogEntryFromDbProduct(product);
+      if (catalogEntry) {
+        if (catalogEntry.productType === 'subscription') successType = 'hosted';
+        else if (catalogEntry.productType === 'support_plan') successType = 'renewal';
+        else if (catalogEntry.productType === 'desktop_license') successType = 'byok';
+      }
+
+      const successUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
+      const cancelUrl = `${window.location.origin}/#pricing`;
+
+      // Call the Edge Function with anon key as bearer (required by Supabase gateway)
+      // and guestCheckout flag so the function skips JWT user validation
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+      const functionUrl = `${supabaseUrl}/functions/v1/create-checkout-session`;
+
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          priceId: product.stripe_price_id,
+          successUrl,
+          cancelUrl,
+          guestCheckout: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.message || `Checkout failed (${response.status})`);
+      }
+
+      const data = await response.json();
+
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('Checkout session URL was not returned by the server.');
+      }
+    } catch (err: any) {
+      console.error('Guest checkout failed:', err);
+      setCheckoutError(err.message || 'An unexpected error occurred during checkout.');
     } finally {
       if (!window.location.href.includes('stripe')) setCheckingOutProductId(null);
     }
@@ -250,16 +370,18 @@ const Pricing: React.FC<PricingProps> = ({
   };
 
   const handleCheckout = async (product: any) => {
-    if (!session) {
-      onSignIn();
-      return;
-    }
-
     if (!product.is_active || !product.stripe_price_id) {
       setCheckoutError("This product is currently unavailable for automated checkout.");
       return;
     }
 
+    // Guest checkout: skip pre-check (no user to check against)
+    if (!session) {
+      await executeGuestCheckout(product);
+      return;
+    }
+
+    // Authenticated checkout: full pre-check + duplicate guard
     setCheckingOutProductId(product.id);
     setCheckoutError(null);
 
@@ -353,13 +475,42 @@ const Pricing: React.FC<PricingProps> = ({
                     {sectionProducts.map((product) => {
                       const catalogEntry = resolveCatalogEntryFromDbProduct(product);
                       const name = resolveDisplayName({ productKey: catalogEntry?.productKey, stripePriceId: product.stripe_price_id, fallbackName: product.name });
-                      const price = product.price != null ? `$${product.price}` : product.metadata?.price ? `$${product.metadata.price}` : 'Live Price';
-                      const billingSuffix = product.interval ? `/${product.interval}` : product.metadata?.billingSuffix || '';
+
+                      // Resolve price: live data → metadata → plan-specific fallback
+                      const fallback = catalogEntry ? FALLBACK_PRICES[catalogEntry.productKey] : undefined;
+                      let price: string;
+                      let billingSuffix: string;
+
+                      if (product.price != null) {
+                        price = `$${product.price}`;
+                        billingSuffix = product.interval ? `/${product.interval}` : (product.metadata?.billingSuffix || fallback?.billingSuffix || '');
+                      } else if (product.metadata?.price) {
+                        price = `$${product.metadata.price}`;
+                        billingSuffix = product.interval ? `/${product.interval}` : (product.metadata?.billingSuffix || fallback?.billingSuffix || '');
+                      } else if (fallback) {
+                        price = fallback.displayPrice;
+                        billingSuffix = fallback.billingSuffix;
+                        if (process.env.NODE_ENV === 'development') {
+                          console.warn(`[Pricing] Using fallback price for "${name}" (${catalogEntry?.productKey}) — live price missing from DB.`);
+                        }
+                      } else {
+                        price = '—';
+                        billingSuffix = '';
+                        if (process.env.NODE_ENV === 'development') {
+                          console.warn(`[Pricing] No price data and no fallback for product "${name}".`);
+                        }
+                      }
                       
+                      // Use authoritative feature list when available; fall back to DB features
+                      const productKey = catalogEntry?.productKey;
                       let features: string[] = [];
-                      if (Array.isArray(product.features)) features = product.features;
-                      else if (Array.isArray(product.metadata?.features)) features = product.metadata.features;
-                      else if (typeof product.features === 'string') {
+                      if (productKey && PLAN_FEATURES[productKey]) {
+                        features = PLAN_FEATURES[productKey]!;
+                      } else if (Array.isArray(product.features)) {
+                        features = product.features;
+                      } else if (Array.isArray(product.metadata?.features)) {
+                        features = product.metadata.features;
+                      } else if (typeof product.features === 'string') {
                         try { features = JSON.parse(product.features); } catch (e) { features = [product.features]; }
                       } else if (product.description) {
                         features = [product.description];

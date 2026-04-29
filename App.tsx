@@ -8,6 +8,7 @@ import DigitalDoubles from './components/DigitalDoubles';
 import Workflow from './components/Workflow';
 import CharacterSheets from './components/CharacterSheets';
 import TechSpecs from './components/TechSpecs';
+import ShowcaseCarousel from './components/ShowcaseCarousel';
 import Pricing from './components/Pricing';
 import FaqSection from './components/FaqSection';
 import Footer from './components/Footer';
@@ -27,6 +28,7 @@ import CustomerDetailAdmin from './pages/admin/CustomerDetail';
 import InboxAdmin from './pages/admin/Inbox';
 import LeadsAdmin from './pages/admin/Leads';
 import Success from './pages/Success';
+import GetStarted from './pages/GetStarted';
 import DownloadHandler from './pages/DownloadHandler';
 import Documentation from './pages/Documentation';
 import Tutorials from './pages/Tutorials';
@@ -81,6 +83,10 @@ function App() {
     const searchParams = new URLSearchParams(location.search);
     if (searchParams.get('auth') === 'signin' && !session && !isLoadingSession) {
       setAuthModalMode('signin');
+      // Clear the query param so it doesn't re-trigger on reload/hot-reload
+      searchParams.delete('auth');
+      const cleanSearch = searchParams.toString();
+      window.history.replaceState({}, '', `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}`);
     }
   }, [location.search, session, isLoadingSession]);
 
@@ -106,6 +112,7 @@ function App() {
         <Navbar session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
         <Hero />
         <LaunchAdvantage />
+        <ShowcaseCarousel />
         <DigitalDoubles />
         <Workflow />
         <CharacterSheets />
@@ -132,6 +139,7 @@ function App() {
           <Route path="/" element={LandingPage} />
           
           <Route path="/success/:type" element={<Success />} />
+          <Route path="/get-started" element={<GetStarted />} />
           
           {/* Secure Cloudflare R2 Delivery Handoff Route */}
           <Route path="/download/:id" element={<DownloadHandler />} />
