@@ -43,6 +43,16 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         agencyExpiration: Date | null;
     } | null>(null);
 
+    // Subscription status
+    const [subStatus, setSubStatus] = useState<{
+        hasStarter: boolean;
+        hasPro: boolean;
+        starterSub: any | null;
+        proSub: any | null;
+        starterExpiration: Date | null;
+        proExpiration: Date | null;
+    } | null>(null);
+
     const isExpiringOrExpired = (date: Date | null): boolean => {
         if (!date) return false;
         const sixtyDaysFromNow = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
@@ -288,6 +298,27 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 agencyExpiration: getByokExpiration(agencyLic),
             });
 
+            // Analyze Subscriptions
+            const resolveSubKey = (sub: any) => {
+                if (sub.metadata?.product_key) return sub.metadata.product_key;
+                const dbProd = productsMap.get(sub.product_id);
+                if (dbProd) return dbProd.product_key;
+                return null;
+            };
+
+            const activeSubsList = subsRes.data || [];
+            const starterSub = activeSubsList.find((s: any) => s.status === 'active' && resolveSubKey(s) === 'starter');
+            const proSub = activeSubsList.find((s: any) => s.status === 'active' && resolveSubKey(s) === 'pro');
+
+            setSubStatus({
+                hasStarter: !!starterSub,
+                hasPro: !!proSub,
+                starterSub: starterSub || null,
+                proSub: proSub || null,
+                starterExpiration: starterSub?.current_period_end ? new Date(starterSub.current_period_end) : null,
+                proExpiration: proSub?.current_period_end ? new Date(proSub.current_period_end) : null,
+            });
+
             const lacksData = fetchedOrders.length === 0 && fetchedLicenses.length === 0 && fetchedDownloads.length === 0;
             if (lacksData && session.user.email) {
                 const guestCheck = await supabase.from('orders').select('id').eq('customer_email', session.user.email).is('user_id', null).limit(1).maybeSingle();
@@ -426,6 +457,60 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         }
     };
 
+    // ── Hosted Subscription Checkout ──
+    const handleSubscriptionCheckout = async (productKey: string) => {
+        setTopUpLoading(productKey);
+        setTopUpError(null);
+
+        try {
+            const { data: product } = await supabase.from('products').select('*').eq('product_key', productKey).eq('is_active', true).maybeSingle();
+
+            if (!product || !product.stripe_price_id) {
+                setTopUpError('This product is currently unavailable. Please try again later.');
+                return;
+            }
+            if (product.stripe_price_id.startsWith('REPLACE_WITH_')) {
+                setTopUpError('This product is not yet configured for checkout.');
+                return;
+            }
+
+            const { data: { session: activeSession } } = await supabase.auth.getSession();
+            if (!activeSession?.access_token) {
+                setTopUpError('Please sign in to continue.');
+                return;
+            }
+
+            const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=hosted`;
+
+            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+                body: {
+                    priceId: product.stripe_price_id,
+                    successUrl: returnUrl,
+                    cancelUrl: `${window.location.origin}/#pricing`,
+                }
+            });
+
+            if (error) {
+                const parsed = typeof error === 'string' ? { message: error } : error;
+                if (parsed?.context?.code === 'duplicate_purchase' || parsed?.message?.includes('already own')) {
+                    setTopUpError(parsed?.context?.message || 'You already own this product.');
+                } else {
+                    throw new Error(parsed?.message || 'Checkout failed');
+                }
+                return;
+            }
+            if (data?.url) {
+                window.location.href = data.url;
+            } else {
+                throw new Error('Checkout session URL was not returned.');
+            }
+        } catch (err: any) {
+            setTopUpError(err.message || 'An unexpected error occurred during checkout.');
+        } finally {
+            setTopUpLoading(null);
+        }
+    };
+
     return (
         <section id="account-dashboard" className="py-20 border-t border-nano-border bg-black/20 min-h-[60vh]">
             <div className="container mx-auto px-6">
@@ -542,6 +627,87 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                             500 Credits — $45
                                         </button>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Hosted Subscriptions Section */}
+                            {subStatus && (
+                                <div className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                    <h3 className="text-lg font-bold mb-4">Hosted Subscriptions</h3>
+                                    
+                                    {subStatus.hasPro ? (
+                                        <>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Plan</div>
+                                                    <div className="text-white font-medium">Pro</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Status</div>
+                                                    <div className="text-green-400 font-medium">Active</div>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Renews On</div>
+                                                    <div className="text-white font-medium">
+                                                        {subStatus.proExpiration ? subStatus.proExpiration.toLocaleDateString() : 'Unknown'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : subStatus.hasStarter ? (
+                                        <>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Plan</div>
+                                                    <div className="text-white font-medium">Starter</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Status</div>
+                                                    <div className="text-green-400 font-medium">Active</div>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Renews On</div>
+                                                    <div className="text-white font-medium">
+                                                        {subStatus.starterExpiration ? subStatus.starterExpiration.toLocaleDateString() : 'Unknown'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-nano-border/30">
+                                                <button
+                                                    onClick={() => handleSubscriptionCheckout('pro')}
+                                                    disabled={!!topUpLoading}
+                                                    className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {topUpLoading === 'pro' && <Loader2 size={14} className="animate-spin" />}
+                                                    Upgrade to Pro — $99/month
+                                                </button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <p className="text-sm text-nano-text mb-4">
+                                                You do not have an active hosted subscription. Choose a plan to get monthly credits.
+                                            </p>
+                                            <div className="flex flex-wrap gap-4">
+                                                <button
+                                                    onClick={() => handleSubscriptionCheckout('starter')}
+                                                    disabled={!!topUpLoading}
+                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {topUpLoading === 'starter' && <Loader2 size={14} className="animate-spin" />}
+                                                    Buy Starter — $49/month
+                                                </button>
+                                                <button
+                                                    onClick={() => handleSubscriptionCheckout('pro')}
+                                                    disabled={!!topUpLoading}
+                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {topUpLoading === 'pro' && <Loader2 size={14} className="animate-spin" />}
+                                                    Buy Pro — $99/month
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
 

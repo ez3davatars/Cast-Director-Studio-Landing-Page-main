@@ -99,34 +99,81 @@ serve(async (req: Request) => {
       // 4b. Backend Duplicate Guard (authenticated only)
       if (product) {
         const { data: activeLicenses } = await supabaseAdmin.from('licenses')
-            .select('*, products ( name )')
+            .select('*, products ( name, product_key )')
             .eq('user_id', user.id)
             .ilike('status', 'active');
             
-        const hasActiveLicense = activeLicenses?.some((l: any) => {
+        const { data: activeSubs } = await supabaseAdmin.from('subscriptions')
+            .select('id, metadata').eq('user_id', user.id).ilike('status', 'active');
+            
+        const productKey = product.product_key || product.metadata?.product_key || '';
+        
+        let blockReason = null;
+        let errorMessage = `You already own an active license or subscription for ${product.name || 'this product'}.`;
+
+        // Check 1: Exact Match (Subscription)
+        if (activeSubs?.some(s => s.metadata?.stripe_price_id === priceId)) {
+            blockReason = "exact_subscription_exists";
+        }
+        
+        // Check 2: Exact Match (License)
+        if (!blockReason && activeLicenses?.some((l: any) => {
             const pName = product.name || '';
             const ownedName = (l.license_name || l.products?.name || '').toLowerCase().trim();
             const targetName = pName.toLowerCase().trim();
-            
             return l.product_id === product.id || 
                    l.stripe_price_id === priceId ||
                    (ownedName && targetName && ownedName === targetName);
-        });
-            
-        const { data: activeSubs } = await supabaseAdmin.from('subscriptions')
-            .select('id').eq('user_id', user.id).ilike('status', 'active').eq('metadata->>stripe_price_id', priceId).limit(1);
+        })) {
+            blockReason = "exact_license_exists";
+        }
 
-        if (hasActiveLicense || (activeSubs && activeSubs.length > 0)) {
-            if (allowDuplicatePurchase !== true) {
-                return new Response(JSON.stringify({ 
-                    error: "duplicate_purchase",
-                    code: "duplicate_purchase",
-                    message: `You already own an active license or subscription for ${product.name || 'this product'}.`,
-                    productKey: product.product_key,
-                    productName: product.name,
-                    reason: "active_license_exists"
-                }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // Check 3: Cross-tier Blocks
+        if (!blockReason) {
+            if (productKey === 'indie_desktop_byok') {
+                if (activeLicenses?.some((l: any) => l.products?.product_key === 'agency_desktop_byok')) {
+                    blockReason = "higher_tier_owned";
+                    errorMessage = "You already own the Agency Commercial tier, which includes all Indie features.";
+                }
+            } else if (productKey === 'starter') {
+                // Determine if user has Pro by checking activeSubs metadata against products
+                // (Optimized: we can fetch all pro price IDs or just check if they have a sub with 'pro' in the name/metadata if available)
+                // For simplicity, we block Starter if any active subscription is NOT Starter (i.e. they have Pro)
+                // We'll rely on the frontend passing the correct intent, but backend will block if they have a sub with a different price ID (which means Pro, since there are only 2)
+                const hasPro = activeSubs?.some(s => s.metadata?.product_key === 'pro' || s.metadata?.stripe_price_id !== priceId);
+                if (activeSubs && activeSubs.length > 0 && hasPro) {
+                    blockReason = "higher_tier_owned";
+                    errorMessage = "You already have an active Pro subscription.";
+                }
             }
+        }
+
+        // Check 4: Renewal Prerequisites
+        if (!blockReason && (productKey.includes('updates') || productKey.includes('support'))) {
+            const isIndieRenewal = productKey.includes('indie');
+            const isAgencyRenewal = productKey.includes('agency');
+            
+            const ownsIndie = activeLicenses?.some((l: any) => l.products?.product_key === 'indie_desktop_byok');
+            const ownsAgency = activeLicenses?.some((l: any) => l.products?.product_key === 'agency_desktop_byok');
+            
+            if (isIndieRenewal && !ownsIndie) {
+                blockReason = "missing_base_license";
+                errorMessage = "You must own the Indie Desktop BYOK license to purchase this renewal.";
+            } else if (isAgencyRenewal && !ownsAgency) {
+                blockReason = "missing_base_license";
+                errorMessage = "You must own the Agency Commercial BYOK license to purchase this renewal.";
+            }
+        }
+
+        if (blockReason && allowDuplicatePurchase !== true) {
+            return new Response(JSON.stringify({ 
+                error: "duplicate_purchase",
+                code: "duplicate_purchase",
+                message: errorMessage,
+                productKey: product.product_key,
+                productName: product.name,
+                reason: blockReason
+            }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
 
