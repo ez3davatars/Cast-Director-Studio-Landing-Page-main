@@ -45,6 +45,10 @@ const faqItems = [
     q: 'Will Cast Director Studio support other AI image models in the future?',
     a: "Cast Director Studio is designed as a provider-aware creative workflow that can evolve with leading AI image models. As new model options become available, additional provider support may be evaluated where API access, quality, pricing, and product fit make sense. The creative direction system is built to work across model capabilities as they advance.",
   },
+  {
+    q: 'How do Generation Credits work?',
+    a: "Generation Credits are based on render size. A standard high-quality 1K generation uses 1 Credit. A 2K widescreen image or character sheet uses 2 Credits. An ultra-high 4K generation uses 6 Credits because it requires significantly more generation power. BYOK users do not consume credits — they use their own API key and are billed directly by their provider.",
+  },
 ];
 
 import { useScrollReveal } from '../hooks/useScrollReveal';

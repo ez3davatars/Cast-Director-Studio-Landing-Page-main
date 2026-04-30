@@ -3,8 +3,9 @@ import SupportTickets from './SupportTickets';
 import ClaimPurchasesModal from './ClaimPurchasesModal';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { getProductByStripePriceId, getProductByKey } from '../lib/products';
+import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
+import { Loader2 } from 'lucide-react';
 
 interface AccountDashboardProps {
     session: Session;
@@ -27,12 +28,16 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     // Strict Error State
     const [errorState, setErrorState] = useState<string | null>(null);
 
+    // Credit top-up state
+    const [topUpLoading, setTopUpLoading] = useState<string | null>(null);
+    const [topUpError, setTopUpError] = useState<string | null>(null);
+
     const loadDashboard = async () => {
         try {
             setLoading(true);
             setErrorState(null);
 
-            const fetchWallet = supabase.from('credit_wallets').select('balance').eq('user_id', session.user.id).maybeSingle().then(res => res.error ? { data: null, error: res.error } : res);
+            const fetchWallet = supabase.from('profiles').select('credit_balance').eq('id', session.user.id).maybeSingle().then(res => res.error ? { data: null, error: res.error } : res);
             const fetchProducts = supabase.from('products').select('*');
             const fetchOrders = supabase.from('orders').select('*, order_items(*)').eq('user_id', session.user.id).order('created_at', { ascending: false });
             const fetchLicenses = supabase.from('licenses').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
@@ -231,7 +236,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 });
             }
 
-            setCredits(walletRes.data?.balance ?? null);
+            setCredits(walletRes.data?.credit_balance ?? null);
             setOrders(mappedOrders.length > 0 ? mappedOrders : null);
             setLicenses(mappedLicenses.length > 0 ? mappedLicenses : null);
             setDownloads(mappedDownloads.length > 0 ? mappedDownloads : null);
@@ -264,6 +269,59 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         };
         claimAndLoad();
     }, [session.user.id, session.user.email]);
+
+    // ── Credit Top-Up Checkout ──
+    const handleTopUp = async (packKey: 'credit_pack_100' | 'credit_pack_500') => {
+        setTopUpLoading(packKey);
+        setTopUpError(null);
+
+        try {
+            // Find the product in Supabase by product_key
+            const { data: products } = await supabase.from('products').select('*').eq('product_key', packKey).eq('is_active', true).maybeSingle();
+            const product = products;
+
+            if (!product || !product.stripe_price_id) {
+                setTopUpError('Credit pack is currently unavailable. Please try again later.');
+                return;
+            }
+
+            // Validate not a placeholder Stripe Price ID
+            if (product.stripe_price_id.startsWith('REPLACE_WITH_')) {
+                setTopUpError('Credit packs are not yet configured for checkout.');
+                return;
+            }
+
+            const { data: { session: activeSession } } = await supabase.auth.getSession();
+            if (!activeSession?.access_token) {
+                setTopUpError('Please sign in to purchase credits.');
+                return;
+            }
+
+            const catalogEntry = resolveCatalogEntryFromDbProduct(product);
+            const successType = 'topup';
+            const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
+
+            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+                body: {
+                    priceId: product.stripe_price_id,
+                    successUrl: returnUrl,
+                    cancelUrl: `${window.location.origin}/#pricing`,
+                }
+            });
+
+            if (error) throw new Error(error.message || 'Checkout failed');
+            if (data?.url) {
+                window.location.href = data.url;
+            } else {
+                throw new Error('Checkout session URL was not returned.');
+            }
+        } catch (err: any) {
+            console.error('Credit top-up checkout failed:', err);
+            setTopUpError(err.message || 'An unexpected error occurred.');
+        } finally {
+            setTopUpLoading(null);
+        }
+    };
 
     return (
         <section id="account-dashboard" className="py-20 border-t border-nano-border bg-black/20 min-h-[60vh]">
@@ -322,13 +380,12 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             <div className="grid md:grid-cols-3 gap-6 mb-12">
                                 <div className="rounded-sm border border-nano-border bg-nano-panel/40 p-6">
                                     <div className="text-sm uppercase tracking-wide text-nano-text mb-2 flex justify-between items-center">
-                                        <span>Hosted Credits</span>
-                                        <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-sm">BETA</span>
+                                        <span>Generation Credits</span>
                                     </div>
                                     <div className="text-4xl font-bold text-white">
                                         {credits !== null ? credits : '--'}
                                     </div>
-                                    <p className="text-xs text-nano-text mt-2">Allocated usage balance</p>
+                                    <p className="text-xs text-nano-text mt-2">Available credit balance</p>
                                 </div>
 
                                 <div className="rounded-sm border border-nano-border bg-nano-panel/40 p-6">
@@ -351,6 +408,39 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     <p className="text-xs text-nano-text mt-2">Currently active plans</p>
                                 </div>
                             </div>
+
+                            {/* Credit Top-Up Section — only for users with credits or active subscriptions */}
+                            {(credits !== null || (subscriptions && subscriptions.some(s => s.status === 'active'))) && (
+                                <div className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                    <h3 className="text-lg font-bold mb-2">Top Up Credits</h3>
+                                    <p className="text-sm text-nano-text mb-4">
+                                        Need more generations this month? Add extra credits without changing your plan.
+                                    </p>
+                                    {topUpError && (
+                                        <div className="mb-4 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
+                                            {topUpError}
+                                        </div>
+                                    )}
+                                    <div className="flex flex-wrap gap-4">
+                                        <button
+                                            onClick={() => handleTopUp('credit_pack_100')}
+                                            disabled={!!topUpLoading}
+                                            className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {topUpLoading === 'credit_pack_100' && <Loader2 size={14} className="animate-spin" />}
+                                            100 Credits — $10
+                                        </button>
+                                        <button
+                                            onClick={() => handleTopUp('credit_pack_500')}
+                                            disabled={!!topUpLoading}
+                                            className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {topUpLoading === 'credit_pack_500' && <Loader2 size={14} className="animate-spin" />}
+                                            500 Credits — $45
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="grid lg:grid-cols-2 gap-8">
                                 {/* Left Column: Purchases & Subs */}

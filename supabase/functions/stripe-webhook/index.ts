@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import Stripe from "https://esm.sh/stripe@14.14.0";
+import { MONTHLY_CREDITS, CREDIT_PACK_AMOUNTS } from "../_shared/creditCosts.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
   apiVersion: "2023-10-16",
@@ -19,7 +20,7 @@ serve(async (req: Request) => {
   let event;
   try {
     const body = await req.text();
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    event = await stripe.webhooks.constructEventAsync(body, signature, webhookSecret);
   } catch (err: any) {
     console.error(`⚠️ Webhook signature verification failed.`, err.message);
     return new Response(`Webhook Error: ${err.message}`, { status: 400 });
@@ -47,14 +48,18 @@ serve(async (req: Request) => {
   );
 
   // 1. EVENT-LEVEL IDEMPOTENCY
-  const { error: eventInsertError } = await supabaseAdmin.from('stripe_webhooks').insert([{ id: event.id }]);
+  const { error: eventInsertError } = await supabaseAdmin.from('stripe_webhooks').insert([{ 
+      event_id: event.id,
+      event_type: event.type,
+      payload: event
+  }]);
   if (eventInsertError) {
       if (eventInsertError.code === '23505' || eventInsertError.message.includes('duplicate')) {
           console.log(`[Idempotency] Event ${event.id} already processed. Dropping duplicate.`);
           return new Response("Duplicate event ignored", { status: 200 });
       }
       console.error(`[Error] Failed to log event ${event.id}:`, eventInsertError);
-      return new Response("Internal tracking error", { status: 500 });
+      return new Response(`Internal tracking error: ${eventInsertError.message} (Code: ${eventInsertError.code})`, { status: 500 });
   }
 
   try {
@@ -130,6 +135,12 @@ serve(async (req: Request) => {
               fulfillmentAction = 'renew_renewal_extension_recurring';
           }
       }
+      else if (productType === 'credit_topup') {
+          if (isSession) {
+              isAuthoritative = true;
+              fulfillmentAction = 'credit_topup';
+          }
+      }
 
       if (!isAuthoritative) {
           console.log(`[Gate] Ignored ${event.type} for ${productType}. Event is not authoritative for this product mapping.`);
@@ -145,13 +156,13 @@ serve(async (req: Request) => {
       let contactId = null;
 
       if (customerEmail) {
-          const { data: contact } = await supabaseAdmin.from('contacts').select('id, user_id').eq('email', customerEmail.toLowerCase()).maybeSingle();
+          const { data: contact } = await supabaseAdmin.from('crm_contacts').select('id, user_id').eq('email', customerEmail.toLowerCase()).maybeSingle();
           if (contact) {
               contactId = contact.id;
               if (!userId && contact.user_id) userId = contact.user_id; // Safe guest-to-user fallback
           } else {
               // Auto-upsert so emails succeed
-              const { data: newContact, error: contactInsertErr } = await supabaseAdmin.from('contacts')
+              const { data: newContact, error: contactInsertErr } = await supabaseAdmin.from('crm_contacts')
                  .insert([{ email: customerEmail.toLowerCase(), user_id: userId }])
                  .select('id').single();
               if (!contactInsertErr && newContact) contactId = newContact.id;
@@ -191,15 +202,18 @@ serve(async (req: Request) => {
           order_id: newOrder.id,
           product_id: product.id,
           stripe_price_id: priceId,
-          product_name_snapshot: product.name,
-          amount: amountPaid / 100,
-          currency: currency,
-          product_type: productType,
+          product_name: product.name,
+          product_sku: product.sku || "UNKNOWN",
           quantity: 1,
-          is_test_mode: !event.livemode
+          unit_price: amountPaid / 100,
+          total_price: amountPaid / 100
       }]).select().single();
 
-      if (itemErr) console.error(`[Warning] Order Item failed for Order ${newOrder.id}`, itemErr);
+      if (itemErr) {
+          console.error(`[Warning] Order Item failed for Order ${newOrder.id}`, itemErr);
+          await supabaseAdmin.from('stripe_webhooks').update({ error_message: `OrderItem Error: ${itemErr.message}` }).eq('event_id', event.id);
+          throw new Error(`Order Item generation failed: ${itemErr.message}`);
+      }
 
       let emailAction = null;
       let emailEntityId = newOrder.id;
@@ -224,6 +238,7 @@ serve(async (req: Request) => {
               license_key: newLicenseKey,
               license_type: 'perpetual',
               status: 'active',
+              max_activations: (productKey === 'agency_desktop_byok' || product.name.toLowerCase().includes('agency')) ? 3 : 1,
               updates_expires_at: updatesExpires.toISOString(),
               support_expires_at: updatesExpires.toISOString(),
           }]).select().single();
@@ -259,12 +274,14 @@ serve(async (req: Request) => {
       else if (fulfillmentAction === 'mint_hosted_subscription_initial' || fulfillmentAction === 'renew_hosted_subscription') {
           const stripeSubscriptionId = dataObject.subscription || `sub_fake_${Date.now()}`;
           
+          let periodStartIso = new Date().toISOString();
           let periodEndIso = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
           try {
               if (dataObject.subscription) {
                   const stripeSub = await stripe.subscriptions.retrieve(dataObject.subscription);
                   if (stripeSub && stripeSub.current_period_end) {
                       periodEndIso = new Date(stripeSub.current_period_end * 1000).toISOString();
+                      periodStartIso = new Date(stripeSub.current_period_start * 1000).toISOString();
                   }
               }
           } catch(se) {
@@ -273,14 +290,62 @@ serve(async (req: Request) => {
           
           const { error: subErr } = await supabaseAdmin.from('subscriptions').upsert([{
               user_id: userId,
+              product_id: product.id,
               stripe_customer_id: dataObject.customer,
               stripe_subscription_id: stripeSubscriptionId,
               status: 'active',
+              current_period_start: periodStartIso,
               current_period_end: periodEndIso,
               metadata: { stripe_price_id: priceId }
           }], { onConflict: 'stripe_subscription_id' });
 
-          if (subErr) console.error(`[Fatal] Failed to record Subscription tracker:`, subErr);
+          if (subErr) {
+              console.error(`[Fatal] Failed to record Subscription tracker:`, subErr);
+              await supabaseAdmin.from('stripe_webhooks').update({ error_message: `Subscription Error: ${subErr.message}` }).eq('event_id', event.id);
+              throw new Error(`Subscription tracking failed: ${subErr.message}`);
+          }
+
+          // ── Monthly credit replenishment (additive — does NOT wipe purchased top-ups) ──
+          if (userId) {
+              const monthlyCredits = product.metadata?.monthly_credits
+                  ? parseInt(product.metadata.monthly_credits, 10)
+                  : (MONTHLY_CREDITS[productKey] || 0);
+
+              if (monthlyCredits > 0) {
+                  const { data: profileBefore } = await supabaseAdmin
+                      .from('profiles')
+                      .select('credit_balance')
+                      .eq('id', userId)
+                      .single();
+
+                  const balanceBefore = profileBefore?.credit_balance ?? 0;
+
+                  const { error: creditErr } = await supabaseAdmin
+                      .from('profiles')
+                      .upsert([{ id: userId, credit_balance: balanceBefore + monthlyCredits }]);
+
+                  if (creditErr) {
+                      console.error(`[Warning] Failed to replenish ${monthlyCredits} monthly credits for user ${userId}:`, creditErr);
+                  } else {
+                      // Ledger entry
+                      await supabaseAdmin.from('credit_transactions').insert([{
+                          user_id: userId,
+                          kind: 'SUBSCRIPTION_RENEWAL',
+                          amount: monthlyCredits,
+                          balance_before: balanceBefore,
+                          balance_after: balanceBefore + monthlyCredits,
+                          reason: 'Monthly subscription credit replenishment',
+                          metadata: {
+                              product_key: productKey,
+                              stripe_price_id: priceId,
+                              stripe_subscription_id: stripeSubscriptionId,
+                              fulfillment_action: fulfillmentAction,
+                          }
+                      }]);
+                      console.log(`[Credits] Replenished ${monthlyCredits} credits for user ${userId} (${productKey}). Balance: ${balanceBefore} → ${balanceBefore + monthlyCredits}`);
+                  }
+              }
+          }
 
           emailAction = 'subscription_confirmation'; 
           emailEntityId = stripeSubscriptionId;
@@ -341,6 +406,60 @@ serve(async (req: Request) => {
           
           emailAction = 'renewal_confirmation';
           emailEntityId = dataObject.subscription || newOrder.id;
+      }
+
+      // ============================================
+      // FULFILLMENT: CREDIT TOP-UP PACKS
+      // ============================================
+      else if (fulfillmentAction === 'credit_topup') {
+          if (!userId) {
+              console.error(`[Fatal] Credit top-up requires a resolved user. Cannot add credits to unknown identity.`);
+              // Still record the order (already done above), but skip credit grant
+          } else {
+              const creditsToAdd = product.metadata?.credits
+                  ? parseInt(product.metadata.credits, 10)
+                  : (CREDIT_PACK_AMOUNTS[productKey] || 0);
+
+              if (creditsToAdd <= 0) {
+                  console.error(`[Fatal] Credit top-up resolved 0 credits for product key: ${productKey}`);
+              } else {
+                  const { data: profileBefore } = await supabaseAdmin
+                      .from('profiles')
+                      .select('credit_balance')
+                      .eq('id', userId)
+                      .single();
+
+                  const balanceBefore = profileBefore?.credit_balance ?? 0;
+
+                  const { error: creditErr } = await supabaseAdmin
+                      .from('profiles')
+                      .upsert([{ id: userId, credit_balance: balanceBefore + creditsToAdd }]);
+
+                  if (creditErr) {
+                      console.error(`[Fatal] Failed to add ${creditsToAdd} top-up credits for user ${userId}:`, creditErr);
+                      throw new Error('Credit top-up balance update failed');
+                  }
+
+                  // Ledger entry
+                  await supabaseAdmin.from('credit_transactions').insert([{
+                      user_id: userId,
+                      kind: 'TOPUP_PURCHASE',
+                      amount: creditsToAdd,
+                      balance_before: balanceBefore,
+                      balance_after: balanceBefore + creditsToAdd,
+                      reason: `Credit pack purchase: ${creditsToAdd} credits`,
+                      metadata: {
+                          product_key: productKey,
+                          stripe_price_id: priceId,
+                          stripe_session_id: isSession ? dataObject.id : null,
+                          order_id: newOrder.id,
+                      }
+                  }]);
+
+                  console.log(`[Credits] Added ${creditsToAdd} top-up credits for user ${userId}. Balance: ${balanceBefore} → ${balanceBefore + creditsToAdd}`);
+              }
+          }
+          // No specific email action for credit top-ups — receipt handled by Stripe
       } 
 
       // 7. TRIGGER TRANSACTIONAL EMAIL

@@ -7,12 +7,12 @@ import { supabase } from '../lib/supabase';
 
 /* ── Fallback prices shown when live pricing data is unavailable ── */
 const FALLBACK_PRICES: Record<string, { displayPrice: string; interval: string; billingSuffix: string }> = {
-  starter:                { displayPrice: '$29',  interval: 'month', billingSuffix: '/month' },
+  starter:                { displayPrice: '$49',  interval: 'month', billingSuffix: '/month' },
   pro:                    { displayPrice: '$99',  interval: 'month', billingSuffix: '/month' },
   indie_desktop_byok:     { displayPrice: '$199', interval: '',      billingSuffix: ' one-time' },
-  agency_desktop_byok:    { displayPrice: '$699', interval: '',      billingSuffix: ' one-time' },
-  indie_updates_support:  { displayPrice: '$79',  interval: 'year',  billingSuffix: '/year' },
-  agency_updates_support: { displayPrice: '$199', interval: 'year',  billingSuffix: '/year' },
+  agency_desktop_byok:    { displayPrice: '$499', interval: '',      billingSuffix: ' one-time' },
+  indie_updates_support:  { displayPrice: '$99',  interval: 'year',  billingSuffix: '/year' },
+  agency_updates_support: { displayPrice: '$249', interval: 'year',  billingSuffix: '/year' },
 };
 
 /* ── Authoritative feature lists per plan ──
@@ -21,49 +21,48 @@ const FALLBACK_PRICES: Record<string, { displayPrice: string; interval: string; 
    all plans — the real difference is usage/credits and licensing model. */
 const PLAN_FEATURES: Partial<Record<string, string[]>> = {
   starter: [
-    'Desktop Application Access',
-    'Full Creator Workflow Access',
-    'Hosted Processing, Temporary Delivery',
-    'Monthly Generation Credits: 200',
+    'Managed API Generation',
+    'Monthly Generation Credits: 600',
+    'Active Digital Doubles: 3',
     'Device Activations: 2',
-    'Commercial Use Included',
+    'Max Render Quality: Up to 4K',
+    '4K renders cost 6 credits each',
+    'Commercial Use Rights Included',
     'Standard Support',
-    'Best for light creator use',
   ],
   pro: [
-    'Desktop Application Access',
-    'Full Creator Workflow Access',
-    'Hosted Processing, Temporary Delivery',
-    'Monthly Generation Credits: 1,000',
+    'Managed API Generation',
+    'Monthly Generation Credits: 1,200',
+    'Active Digital Doubles: 10',
     'Device Activations: 2',
-    'Commercial Use Included',
-    'Standard Support',
-    'Best for higher-volume creators',
+    'Max Render Quality: Up to 4K',
+    'Multi-Shot Rendering Included',
+    'Commercial Resale Rights Included',
+    'Priority Support',
   ],
   indie_desktop_byok: [
     'Desktop Application Access',
-    'Full Creator Workflow Access',
     'BYOK API Access',
-    'Use Your Own AI Provider/API Key',
-    'Device Activation: 1',
+    'Connect your own Vertex/Google key',
+    'Active Digital Doubles: Unlimited',
+    'Local Device Activations: 1',
+    'Max Render Quality: Up to 4K',
     'Perpetual License',
     'Updates Included: 12 Months',
-    'Commercial Use Included',
-    'Standard Support',
-    'Best for independent creators',
+    'Updates & Support Renewal: $99/year after 12 months',
   ],
   agency_desktop_byok: [
     'Desktop Application Access',
-    'Full Creator Workflow Access',
     'BYOK API Access',
-    'Use Your Own AI Provider/API Key',
-    'Device Activations: 3',
+    'Connect your own Vertex/Google key',
+    'Active Digital Doubles: Unlimited',
+    'Local Device Activations: 3',
+    'Max Render Quality: Up to 4K',
     'Perpetual License',
+    'Commercial / Client Work Use',
     'Updates Included: 12 Months',
-    'Commercial Use Included',
-    'Agency / Client Work Use',
+    'Updates & Priority Support Renewal: $249/year after 12 months',
     'Priority Support',
-    'Best for studios, teams, and client work',
   ],
 };
 
@@ -476,27 +475,39 @@ const Pricing: React.FC<PricingProps> = ({
                       const catalogEntry = resolveCatalogEntryFromDbProduct(product);
                       const name = resolveDisplayName({ productKey: catalogEntry?.productKey, stripePriceId: product.stripe_price_id, fallbackName: product.name });
 
-                      // Resolve price: live data → metadata → plan-specific fallback
+                      // Resolve price: validated live data → validated metadata → canonical fallback
                       const fallback = catalogEntry ? FALLBACK_PRICES[catalogEntry.productKey] : undefined;
                       let price: string;
                       let billingSuffix: string;
 
-                      if (product.price != null) {
-                        price = `$${product.price}`;
+                      // Helper: returns true only for real numeric price values
+                      const isValidPrice = (v: any): boolean =>
+                        v != null && v !== '' && !isNaN(Number(v)) && typeof v !== 'boolean';
+
+                      // Helper: catches placeholder strings like "Live Price" that leaked from the DB
+                      const isPlaceholder = (v: any): boolean =>
+                        typeof v === 'string' && /live\s*price/i.test(v);
+
+                      const rawDbPrice = product.price;
+                      const rawMetaPrice = product.metadata?.price;
+
+                      if (isValidPrice(rawDbPrice) && !isPlaceholder(rawDbPrice)) {
+                        price = `$${rawDbPrice}`;
                         billingSuffix = product.interval ? `/${product.interval}` : (product.metadata?.billingSuffix || fallback?.billingSuffix || '');
-                      } else if (product.metadata?.price) {
-                        price = `$${product.metadata.price}`;
+                      } else if (isValidPrice(rawMetaPrice) && !isPlaceholder(rawMetaPrice)) {
+                        price = `$${rawMetaPrice}`;
                         billingSuffix = product.interval ? `/${product.interval}` : (product.metadata?.billingSuffix || fallback?.billingSuffix || '');
                       } else if (fallback) {
                         price = fallback.displayPrice;
                         billingSuffix = fallback.billingSuffix;
-                        if (process.env.NODE_ENV === 'development') {
-                          console.warn(`[Pricing] Using fallback price for "${name}" (${catalogEntry?.productKey}) — live price missing from DB.`);
+                        if (import.meta.env.DEV) {
+                          console.warn(`[Pricing] Using fallback price for "${name}" (${catalogEntry?.productKey}) — live price missing or invalid (raw: ${rawDbPrice}).`);
                         }
                       } else {
+                        // Absolute last resort — never show "Live Price"
                         price = '—';
                         billingSuffix = '';
-                        if (process.env.NODE_ENV === 'development') {
+                        if (import.meta.env.DEV) {
                           console.warn(`[Pricing] No price data and no fallback for product "${name}".`);
                         }
                       }

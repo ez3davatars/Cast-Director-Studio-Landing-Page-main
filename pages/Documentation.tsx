@@ -87,9 +87,15 @@ Cast Director Studio does not guarantee support for every model or provider. Our
   },
   {
     title: 'Credits & Generation Usage',
-    content: `Hosted generations consume credits from your plan. Each plan includes a set number of monthly credits, and additional credit packs are available.
+    content: `Managed API generations consume credits from your plan. Each plan includes a set number of monthly credits, and additional credit packs are available for purchase inside your account dashboard.
 
-Credit usage varies by generation type, resolution, and complexity. The pricing page on the site lists current plan options and credit allocations.
+Generation Credits are pegged to render size:
+
+• Standard 1K Generation: 1 Credit
+• 2K Widescreen or Character Sheet: 2 Credits
+• Ultra-High 4K Generation: 6 Credits
+
+The pricing page on the site lists current plan options and credit allocations.
 
 BYOK users do not consume Cast Director Studio credits — they use their own API key and are billed directly by their AI provider.`,
   },
