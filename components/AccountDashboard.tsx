@@ -32,6 +32,27 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     const [topUpLoading, setTopUpLoading] = useState<string | null>(null);
     const [topUpError, setTopUpError] = useState<string | null>(null);
 
+    // BYOK license status
+    const [byokError, setByokError] = useState<string | null>(null);
+    const [byokStatus, setByokStatus] = useState<{
+        hasIndie: boolean;
+        hasAgency: boolean;
+        indieLicense: any | null;
+        agencyLicense: any | null;
+        indieExpiration: Date | null;
+        agencyExpiration: Date | null;
+    } | null>(null);
+
+    const isExpiringOrExpired = (date: Date | null): boolean => {
+        if (!date) return false;
+        const sixtyDaysFromNow = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+        return date <= sixtyDaysFromNow;
+    };
+    const isExpired = (date: Date | null): boolean => {
+        if (!date) return false;
+        return date <= new Date();
+    };
+
     const loadDashboard = async () => {
         try {
             setLoading(true);
@@ -242,6 +263,31 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             setDownloads(mappedDownloads.length > 0 ? mappedDownloads : null);
             setSubscriptions(subsRes.data ?? null);
 
+            // Analyze BYOK license ownership
+            const getByokExpiration = (lic: any): Date | null => {
+                if (!lic) return null;
+                const updates = lic.updates_expires_at ? new Date(lic.updates_expires_at) : null;
+                const support = lic.support_expires_at ? new Date(lic.support_expires_at) : null;
+                if (updates && support) return updates < support ? updates : support;
+                return updates || support || null;
+            };
+            const indieLic = fetchedLicenses.find((l: any) => {
+                const prod = productsMap.get(l.product_id);
+                return prod?.product_key === 'indie_desktop_byok' && l.status === 'active';
+            });
+            const agencyLic = fetchedLicenses.find((l: any) => {
+                const prod = productsMap.get(l.product_id);
+                return prod?.product_key === 'agency_desktop_byok' && l.status === 'active';
+            });
+            setByokStatus({
+                hasIndie: !!indieLic,
+                hasAgency: !!agencyLic,
+                indieLicense: indieLic || null,
+                agencyLicense: agencyLic || null,
+                indieExpiration: getByokExpiration(indieLic),
+                agencyExpiration: getByokExpiration(agencyLic),
+            });
+
             const lacksData = fetchedOrders.length === 0 && fetchedLicenses.length === 0 && fetchedDownloads.length === 0;
             if (lacksData && session.user.email) {
                 const guestCheck = await supabase.from('orders').select('id').eq('customer_email', session.user.email).is('user_id', null).limit(1).maybeSingle();
@@ -318,6 +364,63 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         } catch (err: any) {
             console.error('Credit top-up checkout failed:', err);
             setTopUpError(err.message || 'An unexpected error occurred.');
+        } finally {
+            setTopUpLoading(null);
+        }
+    };
+
+    // ── BYOK / Renewal Checkout ──
+    const handleByokCheckout = async (productKey: string) => {
+        setTopUpLoading(productKey);
+        setByokError(null);
+
+        try {
+            const { data: product } = await supabase.from('products').select('*').eq('product_key', productKey).eq('is_active', true).maybeSingle();
+
+            if (!product || !product.stripe_price_id) {
+                setByokError('This product is currently unavailable. Please try again later.');
+                return;
+            }
+            if (product.stripe_price_id.startsWith('REPLACE_WITH_')) {
+                setByokError('This product is not yet configured for checkout.');
+                return;
+            }
+
+            const { data: { session: activeSession } } = await supabase.auth.getSession();
+            if (!activeSession?.access_token) {
+                setByokError('Please sign in to continue.');
+                return;
+            }
+
+            const successType = productKey.includes('updates') || productKey.includes('support') ? 'renewal' : 'byok';
+            const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
+
+            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+                body: {
+                    priceId: product.stripe_price_id,
+                    successUrl: returnUrl,
+                    cancelUrl: `${window.location.origin}/#pricing`,
+                }
+            });
+
+            if (error) {
+                // Handle duplicate purchase gracefully
+                const parsed = typeof error === 'string' ? { message: error } : error;
+                if (parsed?.context?.code === 'duplicate_purchase' || parsed?.message?.includes('already own')) {
+                    setByokError(parsed?.context?.message || 'You already own this product.');
+                } else {
+                    throw new Error(parsed?.message || 'Checkout failed');
+                }
+                return;
+            }
+            if (data?.url) {
+                window.location.href = data.url;
+            } else {
+                throw new Error('Checkout session URL was not returned.');
+            }
+        } catch (err: any) {
+            console.error('BYOK checkout failed:', err);
+            setByokError(err.message || 'An unexpected error occurred.');
         } finally {
             setTopUpLoading(null);
         }
@@ -439,6 +542,119 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                             500 Credits — $45
                                         </button>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* BYOK Desktop License Section */}
+                            {byokStatus && (
+                                <div className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                    {byokStatus.hasAgency ? (
+                                        <>
+                                            <h3 className="text-lg font-bold mb-4">Desktop License — Agency Commercial BYOK</h3>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Status</div>
+                                                    <div className="text-white font-medium">Active</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Device Activations</div>
+                                                    <div className="text-white font-medium">3</div>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">
+                                                        {isExpired(byokStatus.agencyExpiration) ? 'Updates & Priority Support expired on' : 'Updates & Priority Support active until'}
+                                                    </div>
+                                                    <div className={`font-medium ${isExpired(byokStatus.agencyExpiration) ? 'text-red-400' : 'text-white'}`}>
+                                                        {byokStatus.agencyExpiration ? byokStatus.agencyExpiration.toLocaleDateString() : 'Unknown'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {isExpiringOrExpired(byokStatus.agencyExpiration) && (
+                                                <div className="mt-4 pt-4 border-t border-nano-border/30">
+                                                    <button
+                                                        onClick={() => handleByokCheckout('agency_updates_support')}
+                                                        disabled={!!topUpLoading}
+                                                        className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
+                                                    >
+                                                        {topUpLoading === 'agency_updates_support' && <Loader2 size={14} className="animate-spin" />}
+                                                        Renew Updates & Priority Support — $249/year
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : byokStatus.hasIndie ? (
+                                        <>
+                                            <h3 className="text-lg font-bold mb-4">Desktop License — Indie Desktop BYOK</h3>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Status</div>
+                                                    <div className="text-white font-medium">Active</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Device Activations</div>
+                                                    <div className="text-white font-medium">1</div>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">
+                                                        {isExpired(byokStatus.indieExpiration) ? 'Updates & Support expired on' : 'Updates & Support active until'}
+                                                    </div>
+                                                    <div className={`font-medium ${isExpired(byokStatus.indieExpiration) ? 'text-red-400' : 'text-white'}`}>
+                                                        {byokStatus.indieExpiration ? byokStatus.indieExpiration.toLocaleDateString() : 'Unknown'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-nano-border/30">
+                                                {isExpiringOrExpired(byokStatus.indieExpiration) && (
+                                                    <button
+                                                        onClick={() => handleByokCheckout('indie_updates_support')}
+                                                        disabled={!!topUpLoading}
+                                                        className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
+                                                    >
+                                                        {topUpLoading === 'indie_updates_support' && <Loader2 size={14} className="animate-spin" />}
+                                                        Renew Updates & Support — $99/year
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => handleByokCheckout('agency_desktop_byok')}
+                                                    disabled={!!topUpLoading}
+                                                    className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {topUpLoading === 'agency_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
+                                                    Upgrade to Agency Commercial BYOK — $499
+                                                </button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <h3 className="text-lg font-bold mb-2">Upgrade to BYOK Desktop</h3>
+                                            <p className="text-sm text-nano-text mb-4">
+                                                Generate often? BYOK Desktop may save money by letting you connect your own Google/Vertex API key and pay the AI provider directly instead of relying only on monthly Cast Director Studio credits.
+                                            </p>
+                                            <div className="flex flex-wrap gap-4">
+                                                <button
+                                                    onClick={() => handleByokCheckout('indie_desktop_byok')}
+                                                    disabled={!!topUpLoading}
+                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {topUpLoading === 'indie_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
+                                                    Indie Desktop BYOK — $199
+                                                </button>
+                                                <button
+                                                    onClick={() => handleByokCheckout('agency_desktop_byok')}
+                                                    disabled={!!topUpLoading}
+                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {topUpLoading === 'agency_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
+                                                    Agency Commercial BYOK — $499
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                    {byokError && (
+                                        <div className="mt-4 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
+                                            {byokError}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
