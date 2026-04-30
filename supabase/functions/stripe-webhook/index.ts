@@ -386,10 +386,12 @@ serve(async (req: Request) => {
           }
 
           const now = new Date();
-          const currentSupportStr = targetLicense.support_expires_at || targetLicense.updates_expires_at;
-          const currentSupportDate = currentSupportStr ? new Date(currentSupportStr) : now;
+          const oldUpdatesExpiresAt = targetLicense.updates_expires_at || null;
+          const oldSupportExpiresAt = targetLicense.support_expires_at || null;
+          const currentExpirationStr = oldSupportExpiresAt || oldUpdatesExpiresAt;
+          const currentExpirationDate = currentExpirationStr ? new Date(currentExpirationStr) : now;
 
-          const baseDate = currentSupportDate > now ? currentSupportDate : now;
+          const baseDate = currentExpirationDate > now ? currentExpirationDate : now;
           const newExpirationDate = new Date(baseDate.getTime() + 365 * 24 * 60 * 60 * 1000);
 
           const { error: updateErr } = await supabaseAdmin.from('licenses')
@@ -403,6 +405,23 @@ serve(async (req: Request) => {
               console.error(`[Fatal] Failed to extend base license ${targetLicense.id}:`, updateErr);
               throw new Error("License Extension Failed");
           }
+
+          // Audit: record renewal details in order metadata
+          const renewalAudit = {
+              renewed_license_id: targetLicense.id,
+              renewal_product_key: productKey,
+              old_updates_expires_at: oldUpdatesExpiresAt,
+              new_updates_expires_at: newExpirationDate.toISOString(),
+              old_support_expires_at: oldSupportExpiresAt,
+              new_support_expires_at: newExpirationDate.toISOString(),
+              base_date_used: baseDate.toISOString(),
+              was_expired: currentExpirationDate <= now,
+          };
+          await supabaseAdmin.from('orders')
+              .update({ metadata: renewalAudit })
+              .eq('id', newOrder.id);
+
+          console.log(`[Renewal] License ${targetLicense.id} extended: ${oldSupportExpiresAt || 'null'} → ${newExpirationDate.toISOString()} (base: ${baseDate.toISOString()}, expired: ${currentExpirationDate <= now})`);
           
           emailAction = 'renewal_confirmation';
           emailEntityId = dataObject.subscription || newOrder.id;
