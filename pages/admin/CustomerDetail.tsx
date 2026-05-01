@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { ChevronLeft, AlertTriangle, Send, X, Loader2, Mail } from 'lucide-react';
+import { ChevronLeft, AlertTriangle, Send, X, Loader2, Mail, Coins } from 'lucide-react';
 
 const CustomerDetailAdmin: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -11,6 +11,12 @@ const CustomerDetailAdmin: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [contact, setContact] = useState<any>(null);
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [isAdjustCreditsOpen, setIsAdjustCreditsOpen] = useState(false);
+  const [adjustAmount, setAdjustAmount] = useState<string>('');
+  const [adjustReason, setAdjustReason] = useState<string>('');
+  const [isAdjusting, setIsAdjusting] = useState(false);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [licenses, setLicenses] = useState<any[]>([]);
@@ -63,7 +69,7 @@ const CustomerDetailAdmin: React.FC = () => {
 
       try {
         // 1. Fetch Contact Core (Fail-soft required)
-        let contactQuery = supabase.from('contacts').select('id, email, created_at');
+        let contactQuery = supabase.from('contacts').select('id, email, created_at, user_id');
         if (id?.includes('@')) {
           contactQuery = contactQuery.eq('email', id);
         } else {
@@ -88,6 +94,15 @@ const CustomerDetailAdmin: React.FC = () => {
 
         const assembledContact = { ...contactData, stripe_customer_id: stripeCustomerId };
         setContact(assembledContact);
+
+        if (contactData.user_id) {
+           try {
+             const { data: profileData } = await supabase.from('profiles').select('credit_balance').eq('id', contactData.user_id).single();
+             if (profileData) setCreditBalance(profileData.credit_balance);
+           } catch(e) {
+             warnings.push("profiles.credit_balance");
+           }
+        }
 
         // 3. Parallelize Telemetry Fetches
         const email = assembledContact.email;
@@ -319,6 +334,44 @@ const CustomerDetailAdmin: React.FC = () => {
     }
   };
 
+  const handleAdjustCredits = async () => {
+    const amountNum = Number(adjustAmount);
+    if (!adjustAmount || isNaN(amountNum)) {
+      setAdjustError("Amount must be a valid number.");
+      return;
+    }
+    if (!adjustReason.trim()) {
+      setAdjustError("Reason is required.");
+      return;
+    }
+    if (creditBalance !== null && creditBalance + amountNum < 0) {
+      setAdjustError("Adjustment would result in a negative balance.");
+      return;
+    }
+
+    setIsAdjusting(true);
+    setAdjustError(null);
+
+    try {
+      const { data, error: rpcErr } = await supabase.rpc('admin_add_credits', {
+        p_contact_email: contact.email,
+        p_amount: amountNum,
+        p_reason: adjustReason
+      });
+
+      if (rpcErr) throw new Error(rpcErr.message);
+
+      setCreditBalance(data as number);
+      setIsAdjustCreditsOpen(false);
+      setAdjustAmount('');
+      setAdjustReason('');
+    } catch (e: any) {
+      setAdjustError(e.message || "Failed to adjust credits");
+    } finally {
+      setIsAdjusting(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
@@ -331,15 +384,32 @@ const CustomerDetailAdmin: React.FC = () => {
           </button>
           <div>
             <h2 className="text-2xl font-bold font-mono tracking-wide">Customer Overview</h2>
-            <div className="text-sm font-mono text-nano-yellow mt-1">{contact.email}</div>
+            <div className="flex items-center gap-4 mt-1">
+              <div className="text-sm font-mono text-nano-yellow">{contact.email}</div>
+              {creditBalance !== null && (
+                <div className="flex items-center gap-1.5 text-xs font-mono bg-nano-yellow/10 text-nano-yellow px-2 py-0.5 rounded border border-nano-yellow/20">
+                  <Coins size={12} /> {creditBalance} Credits
+                </div>
+              )}
+            </div>
           </div>
         </div>
-        <button
-          onClick={() => setIsComposeOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-white text-black font-bold text-xs uppercase tracking-wider rounded-md hover:bg-gray-200 transition-colors"
-        >
-          <Send size={14} /> Send Email
-        </button>
+        <div className="flex items-center gap-3">
+          {creditBalance !== null && (
+            <button
+              onClick={() => setIsAdjustCreditsOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-black border border-nano-border text-white font-bold text-xs uppercase tracking-wider rounded-md hover:bg-white/5 transition-colors"
+            >
+              <Coins size={14} className="text-nano-yellow" /> Adjust Credits
+            </button>
+          )}
+          <button
+            onClick={() => setIsComposeOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white text-black font-bold text-xs uppercase tracking-wider rounded-md hover:bg-gray-200 transition-colors"
+          >
+            <Send size={14} /> Send Email
+          </button>
+        </div>
       </div>
 
       {missingSchema.length > 0 && (
@@ -478,6 +548,82 @@ const CustomerDetailAdmin: React.FC = () => {
               >
                 {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} 
                 {isSending ? 'Dispatching...' : 'Dispatch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Adjust Credits Modal */}
+      {isAdjustCreditsOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-nano-bg border border-nano-border w-full max-w-md rounded-xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-nano-border bg-black/40">
+              <h3 className="font-mono font-bold tracking-wide flex items-center gap-2">
+                <Coins size={16} className="text-nano-yellow" /> Adjust Credits
+              </h3>
+              <button 
+                onClick={() => !isAdjusting && setIsAdjustCreditsOpen(false)}
+                className="text-gray-400 hover:text-white"
+                disabled={isAdjusting}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 flex-1 overflow-y-auto space-y-4 font-mono text-sm">
+              <div className="grid grid-cols-[100px_1fr] items-center gap-2">
+                <span className="text-gray-500 text-xs uppercase">Current:</span>
+                <span className="text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/20 py-1.5 px-3 rounded font-bold">{creditBalance}</span>
+              </div>
+
+              <div className="pt-2">
+                <label className="block text-gray-500 text-xs uppercase mb-2">Adjustment Amount</label>
+                <input 
+                  type="number" 
+                  placeholder="e.g. 100 or -50"
+                  value={adjustAmount}
+                  onChange={e => setAdjustAmount(e.target.value)}
+                  disabled={isAdjusting}
+                  className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600"
+                />
+                <div className="text-[10px] text-gray-500 mt-1">Use positive numbers to add, negative to remove.</div>
+              </div>
+
+              <div>
+                <label className="block text-gray-500 text-xs uppercase mb-2">Reason</label>
+                <textarea 
+                  placeholder="Reason for manual adjustment..."
+                  value={adjustReason}
+                  onChange={e => setAdjustReason(e.target.value)}
+                  disabled={isAdjusting}
+                  rows={3}
+                  className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600 resize-none font-sans"
+                />
+              </div>
+
+              {adjustError && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-500 p-3 rounded text-xs">
+                  {adjustError}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-nano-border bg-black/40 px-6 py-4 flex justify-end gap-3">
+              <button 
+                onClick={() => setIsAdjustCreditsOpen(false)}
+                disabled={isAdjusting}
+                className="px-4 py-2 border border-nano-border text-gray-300 hover:bg-white/5 rounded text-xs uppercase tracking-wider font-bold transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleAdjustCredits}
+                disabled={isAdjusting}
+                className="px-6 py-2 bg-nano-yellow text-black rounded text-xs uppercase tracking-wider font-bold hover:bg-yellow-400 transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {isAdjusting ? <Loader2 size={16} className="animate-spin" /> : <Coins size={16} />} 
+                {isAdjusting ? 'Applying...' : 'Apply Adjustment'}
               </button>
             </div>
           </div>
