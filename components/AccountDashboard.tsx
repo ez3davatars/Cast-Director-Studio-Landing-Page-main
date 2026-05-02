@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import SupportTickets from './SupportTickets';
 import ClaimPurchasesModal from './ClaimPurchasesModal';
 import { Session } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
 import { Loader2, Info, MessageSquare } from 'lucide-react';
@@ -375,7 +375,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         // pending guest purchases to this authenticated user before loading data.
         const claimAndLoad = async () => {
             try {
-                await supabase.functions.invoke('claim-purchases', { body: {} });
+                await invokeAuthenticatedFunction('claim-purchases', {});
             } catch (err) {
                 // Non-blocking — claim is a best-effort safety net
                 console.warn('[Dashboard] claim-purchases safety net failed:', err);

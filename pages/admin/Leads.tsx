@@ -144,9 +144,13 @@ const LeadsAdmin: React.FC = () => {
 
   const scrollToLatestMessage = (behavior: ScrollBehavior = 'smooth') => {
     requestAnimationFrame(() => {
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
-      }, 50);
+      const container = adminMessagesContainerRef.current;
+      if (!container) return;
+      if (behavior === 'auto') {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      }
     });
   };
 
@@ -533,6 +537,11 @@ const LeadsAdmin: React.FC = () => {
 
       shouldAutoScrollRef.current = true;
       setReplyText('');
+      // Scroll message thread to bottom without moving the page
+      requestAnimationFrame(() => {
+        const container = adminMessagesContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
+      });
     } catch (e: any) {
       console.error("Admin CRM reply failed:", e);
       setReplyError(e.message || 'Failed to post reply. Check logs.');

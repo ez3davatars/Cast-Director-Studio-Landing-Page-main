@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Loader2, ArrowRight, UserPlus, LogIn, Mail } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { useAuth } from '../App';
 
 /**
@@ -37,9 +37,7 @@ const GetStarted: React.FC = () => {
       // 1. Invoke claim-purchases to link pending records
       setIsClaiming(true);
       try {
-        const { data, error } = await supabase.functions.invoke('claim-purchases', {
-          body: {},
-        });
+        const { data, error } = await invokeAuthenticatedFunction('claim-purchases', {});
         if (!error && data) {
           setClaimResult(data);
         }

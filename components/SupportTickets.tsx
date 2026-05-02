@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import {
   LifeBuoy, Plus, Send, Loader2, X, ChevronRight,
   CheckCircle, AlertCircle, Clock, MessageSquare, ArrowLeft
@@ -118,9 +118,13 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
 
   const scrollToLatestMessage = (behavior: ScrollBehavior = 'smooth') => {
     requestAnimationFrame(() => {
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
-      }, 50);
+      const container = messagesContainerRef.current;
+      if (!container) return;
+      if (behavior === 'auto') {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      }
     });
   };
 
@@ -296,26 +300,15 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
     setSubmitSuccess(null);
 
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dashboard-ticket-submit`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            subject: trimmedSubject,
-            inquiryType: newInquiryType,
-            message: trimmedMessage,
-          }),
-        }
-      );
+      const { data, error: funcErr } = await invokeAuthenticatedFunction('dashboard-ticket-submit', {
+        subject: trimmedSubject,
+        inquiryType: newInquiryType,
+        message: trimmedMessage,
+      });
 
-      const data = await res.json();
+      if (funcErr) throw funcErr;
 
-      if (data.ok && data.ticketId) {
+      if (data?.ok && data?.ticketId) {
         setSubmitSuccess(data.ticketId);
         setNewSubject('');
         setNewInquiryType('');
@@ -354,23 +347,15 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
     setReplyError(null);
 
     try {
-      const { data, error: funcErr } = await supabase.functions.invoke('customer-crm-reply', {
-        body: {
-          conversation_id: selectedTicket.id,
-          reply_text: replyText
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`
-        }
+      const { data, error: funcErr } = await invokeAuthenticatedFunction('customer-crm-reply', {
+        conversation_id: selectedTicket.id,
+        reply_text: replyText.trim(),
       });
 
-      if (funcErr) throw new Error(funcErr.message || 'Network error occurred');
-      if (data?.error) {
-        throw new Error(`${data.error} | Debug: ${JSON.stringify(data.debug || {})}`);
-      }
+      if (funcErr) throw funcErr;
 
       const newMsg = data?.message;
-      if (!newMsg) throw new Error('Reply succeeded but no data was returned');
+      if (!newMsg) throw new Error('Reply succeeded but no message data was returned.');
 
       // Update the selected ticket
       setSelectedTicket(prev => {
@@ -390,6 +375,11 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
 
       shouldAutoScrollRef.current = true;
       setReplyText('');
+      // Scroll message thread to bottom without moving the page
+      requestAnimationFrame(() => {
+        const container = messagesContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
+      });
     } catch (err: any) {
       console.error('Customer CRM reply error:', err);
       setReplyError(err.message || 'Failed to send reply. Please try again later.');

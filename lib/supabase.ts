@@ -19,21 +19,50 @@ export const supabase = createClient(
   }
 );
 
+/**
+ * Reliably retrieves a fresh Supabase access token.
+ *
+ * getSession() can return null when the in-memory cache is empty
+ * (e.g. after HMR, or a race with onAuthStateChange). In that case
+ * we fall back to getUser(), which makes a network call and
+ * re-hydrates the session in the client, then retry getSession().
+ */
+export async function getAuthenticatedAccessToken(): Promise<string> {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    throw new Error(`Unable to read auth session: ${sessionError.message}`);
+  }
+
+  let token = sessionData.session?.access_token;
+
+  if (!token) {
+    // getSession() returned nothing — force a network round-trip
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+      throw new Error('Your session has expired. Please sign out and sign back in.');
+    }
+
+    // getUser() re-hydrated the session; read it again
+    const retry = await supabase.auth.getSession();
+    token = retry.data.session?.access_token;
+  }
+
+  if (!token) {
+    throw new Error('Your session has expired. Please sign out and sign back in.');
+  }
+
+  return token;
+}
+
 export async function invokeAuthenticatedFunction<TResponse = any>(
   functionName: string,
   payload?: any,
   options?: { method?: 'POST' | 'GET' | 'PUT' | 'PATCH' | 'DELETE' }
 ): Promise<{ data: TResponse | null; error: Error | null }> {
   try {
-    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-    if (sessionErr) {
-      throw new Error(`Unable to read auth session: ${sessionErr.message}`);
-    }
-    const token = sessionData.session?.access_token;
-    if (!token) {
-      // 401 equivalent error string for missing token
-      throw new Error('Your admin session expired. Please sign out and sign back in.');
-    }
+    const token = await getAuthenticatedAccessToken();
 
     const method = options?.method || 'POST';
     const reqOptions: RequestInit = {
@@ -61,9 +90,9 @@ export async function invokeAuthenticatedFunction<TResponse = any>(
 
     if (!res.ok) {
       if (res.status === 401) {
-        throw new Error('Your admin session expired. Please sign out and sign back in.');
+        throw new Error('Your session has expired. Please sign out and sign back in.');
       } else if (res.status === 403) {
-        throw new Error('You are signed in, but this account does not have admin access.');
+        throw new Error('You do not have permission to perform this action.');
       }
       throw new Error(data.error || `HTTP ${res.status}: ${rawText}`);
     }

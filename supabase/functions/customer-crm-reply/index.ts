@@ -50,16 +50,18 @@ serve(async (req: any) => {
     // @ts-ignore
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     // @ts-ignore
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    // @ts-ignore
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     // @ts-ignore
     const resendApiKey = Deno.env.get('RESEND_API_KEY') ?? '';
 
     if (!serviceKey) throw new Error('Server misconfiguration: service key missing');
 
-    const sbAdmin = createClient(supabaseUrl, serviceKey);
+    // Validate JWT using anon-key client (matches dashboard-ticket-submit pattern)
+    const authClient = createClient(supabaseUrl, anonKey);
     const token = authHeader.replace('Bearer ', '');
-    
-    const { data: { user }, error: userError } = await sbAdmin.auth.getUser(token);
+    const { data: { user }, error: userError } = await authClient.auth.getUser(token);
 
     if (userError || !user) {
       return jsonResponse(200, { 
@@ -68,6 +70,9 @@ serve(async (req: any) => {
         debug: { authHeader: authHeader ? authHeader.substring(0, 15) + '...' : 'null' }
       });
     }
+
+    // Service-role client for privileged data operations
+    const sbAdmin = createClient(supabaseUrl, serviceKey);
 
     // ── Verify Ownership & Get Conversation Data ──
     const { data: convo, error: convoErr } = await sbAdmin
