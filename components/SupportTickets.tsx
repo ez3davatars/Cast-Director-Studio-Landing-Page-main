@@ -5,6 +5,7 @@ import {
   LifeBuoy, Plus, Send, Loader2, X, ChevronRight,
   CheckCircle, AlertCircle, Clock, MessageSquare, ArrowLeft
 } from 'lucide-react';
+import { useCrmTicketPresence } from '../hooks/useCrmTicketPresence';
 
 // ── Types ──
 interface CrmMessage {
@@ -29,11 +30,17 @@ interface CrmConversation {
 
 // ── Constants ──
 const INQUIRY_TYPES = [
-  'Product Support',
-  'Sales / Licensing',
-  'Hosted Credits or Billing',
-  'BYOK License Questions',
-  'General Question',
+  { label: 'Billing', value: 'billing' },
+  { label: 'License / Activation', value: 'license_activation' },
+  { label: 'Hosted Credits', value: 'hosted_credits' },
+  { label: 'BYOK Setup', value: 'byok_setup' },
+  { label: 'Generation Failed', value: 'generation_failed' },
+  { label: 'App Bug', value: 'app_bug' },
+  { label: 'Download / Install', value: 'download_install' },
+  { label: 'Feature Question', value: 'feature_question' },
+  { label: 'Account Access', value: 'account_access' },
+  { label: 'Refund / Cancellation', value: 'refund_cancellation' },
+  { label: 'General Support', value: 'general_support' },
 ];
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -42,10 +49,15 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.R
     color: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30',
     icon: <Clock size={10} />,
   },
-  open: {
-    label: 'Open',
+  in_progress: {
+    label: 'In Progress',
     color: 'text-nano-yellow bg-nano-yellow/10 border-nano-yellow/30',
     icon: <MessageSquare size={10} />,
+  },
+  waiting_on_customer: {
+    label: 'Waiting on You',
+    color: 'text-purple-400 bg-purple-400/10 border-purple-400/30',
+    icon: <Clock size={10} />,
   },
   resolved: {
     label: 'Resolved',
@@ -61,15 +73,26 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.R
 
 interface SupportTicketsProps {
   session: Session;
+  onUnreadCount?: (count: number, unreadTickets: { id: string; subject: string }[]) => void;
+  autoOpenTicketId?: string | null;
 }
 
-const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
+const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount, autoOpenTicketId }) => {
   const [tickets, setTickets] = useState<CrmConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const supportPanelRef = useRef<HTMLDivElement>(null);
 
   // Selected ticket
   const [selectedTicket, setSelectedTicket] = useState<CrmConversation | null>(null);
+
+  // Track customer presence in the selected ticket
+  useCrmTicketPresence({
+    conversationId: selectedTicket?.id,
+    userId: session.user.id,
+    role: 'customer',
+    enabled: !!selectedTicket,
+  });
 
   // New ticket modal
   const [showNewTicket, setShowNewTicket] = useState(false);
@@ -84,8 +107,45 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
   const [replyText, setReplyText] = useState('');
   const [isReplying, setIsReplying] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [showNewMessageToast, setShowNewMessageToast] = useState(false);
 
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const selectedTicketIdRef = useRef<string | undefined>(undefined);
+  const ticketsRef = useRef<CrmConversation[]>([]);
+  const shouldAutoScrollRef = useRef(true);
+  const prevTicketIdRef = useRef<string | undefined>(undefined);
+
+  const scrollToLatestMessage = (behavior: ScrollBehavior = 'smooth') => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+      }, 50);
+    });
+  };
+
+  useEffect(() => {
+    selectedTicketIdRef.current = selectedTicket?.id;
+  }, [selectedTicket?.id]);
+
+  useEffect(() => {
+    ticketsRef.current = tickets;
+  }, [tickets]);
+
+  useEffect(() => {
+    if (!selectedTicket?.id) return;
+
+    if (prevTicketIdRef.current !== selectedTicket.id) {
+      shouldAutoScrollRef.current = true;
+      setShowNewMessageToast(false);
+      prevTicketIdRef.current = selectedTicket.id;
+      scrollToLatestMessage('auto');
+    } else {
+      if (shouldAutoScrollRef.current) {
+        scrollToLatestMessage('smooth');
+      }
+    }
+  }, [selectedTicket?.id, selectedTicket?.messages?.length]);
 
   // ── Fetch user's tickets ──
   const fetchTickets = async () => {
@@ -114,12 +174,109 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
     fetchTickets();
   }, [session.user.id]);
 
-  // Auto-scroll messages
+  // ── Realtime Subscriptions ──
   useEffect(() => {
-    if (selectedTicket && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!session?.user?.id) return;
+
+    // 1. Messages Subscription
+    const messagesChannel = supabase.channel('customer-crm-messages')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'crm_messages' },
+        (payload) => {
+          const newMsg = payload.new as any;
+          
+          // Client-side filter: Ensure it belongs to one of our tickets
+          // (RLS enforces this, but this is a secondary safety net)
+          const belongsToUs = ticketsRef.current.some(t => t.id === newMsg.conversation_id);
+          if (!belongsToUs) return;
+
+          setTickets(prev => prev.map(t => {
+            if (t.id === newMsg.conversation_id) {
+              if (t.messages.some(m => m.id === newMsg.id)) return t;
+              const updatedMessages = [...t.messages, newMsg].sort(
+                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+              );
+              return { ...t, messages: updatedMessages };
+            }
+            return t;
+          }));
+
+          setSelectedTicket(prev => {
+            if (prev && prev.id === newMsg.conversation_id) {
+              if (prev.messages.some(m => m.id === newMsg.id)) return prev;
+              const updatedMessages = [...prev.messages, newMsg].sort(
+                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+              );
+
+              // Auto-scroll logic based on position
+              const container = messagesContainerRef.current;
+              const isNearBottom = container ? (container.scrollHeight - container.scrollTop - container.clientHeight < 100) : true;
+              
+              if (isNearBottom) {
+                shouldAutoScrollRef.current = true;
+              } else {
+                shouldAutoScrollRef.current = false;
+                setTimeout(() => setShowNewMessageToast(true), 0);
+              }
+
+              return { ...prev, messages: updatedMessages };
+            }
+            return prev;
+          });
+        }
+      )
+      .subscribe();
+
+    // 2. Conversations Subscription
+    const convosChannel = supabase.channel('customer-crm-convos')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'crm_conversations' },
+        (payload) => {
+          const updated = payload.new as any;
+          // Security check: Verify it's actually ours
+          if (updated.linked_user_id !== session.user.id) return;
+
+          setTickets(prev => prev.map(t => {
+            if (t.id === updated.id) {
+              return { ...t, status: updated.status, priority: updated.priority, category: updated.category };
+            }
+            return t;
+          }));
+          setSelectedTicket(prev => {
+            if (prev && prev.id === updated.id) {
+              return { ...prev, status: updated.status, priority: updated.priority, category: updated.category };
+            }
+            return prev;
+          });
+        }
+      )
+      .subscribe();
+
+    // 3. Disconnect Fallback
+    const systemChannel = supabase.channel('customer-system')
+      .on('system', { event: '*' }, (payload) => {
+        if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
+          fetchTickets(); // Refetch on reconnect to catch missed events
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messagesChannel);
+      supabase.removeChannel(convosChannel);
+      supabase.removeChannel(systemChannel);
+    };
+  }, [session.user.id]);
+
+  // Auto-scroll messages container without scrolling the page when switching tickets
+  useEffect(() => {
+    if (selectedTicket && messagesContainerRef.current) {
+      const container = messagesContainerRef.current;
+      container.scrollTop = container.scrollHeight;
     }
-  }, [selectedTicket]);
+  }, [selectedTicket?.id]);
 
   // ── Submit new ticket ──
   const handleSubmitTicket = async (e: React.FormEvent) => {
@@ -201,39 +358,37 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
         body: {
           conversation_id: selectedTicket.id,
           reply_text: replyText
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
         }
       });
 
       if (funcErr) throw new Error(funcErr.message || 'Network error occurred');
-      if (data?.error) throw new Error(data.error);
+      if (data?.error) {
+        throw new Error(`${data.error} | Debug: ${JSON.stringify(data.debug || {})}`);
+      }
 
       const newMsg = data?.message;
       if (!newMsg) throw new Error('Reply succeeded but no data was returned');
 
-      // Optimistically add the message to the current ticket
+      // Update the selected ticket
       setSelectedTicket(prev => {
         if (!prev) return prev;
-        const updatedStatus = prev.status !== 'open' ? 'open' : prev.status;
-        return {
-          ...prev,
-          status: updatedStatus,
-          messages: [...prev.messages, newMsg]
-        };
+        const updatedStatus = data?.newStatus || prev.status;
+        return { ...prev, status: updatedStatus, messages: [...prev.messages, newMsg] };
       });
 
       // Update the tickets list
       setTickets(prev => prev.map(t => {
         if (t.id === selectedTicket.id) {
-          const updatedStatus = t.status !== 'open' ? 'open' : t.status;
-          return {
-            ...t,
-            status: updatedStatus,
-            messages: [...t.messages, newMsg]
-          };
+          const updatedStatus = data?.newStatus || t.status;
+          return { ...t, status: updatedStatus, messages: [...t.messages, newMsg] };
         }
         return t;
       }));
 
+      shouldAutoScrollRef.current = true;
       setReplyText('');
     } catch (err: any) {
       console.error('Customer CRM reply error:', err);
@@ -267,9 +422,40 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
     return sorted[0].direction === 'outbound';
   };
 
+  // Report unread count to parent
+  useEffect(() => {
+    if (!onUnreadCount) return;
+    const unread = tickets.filter(hasUnreadReply);
+    onUnreadCount(
+      unread.length,
+      unread.map(t => ({ id: t.id, subject: t.subject || 'Support Ticket' }))
+    );
+  }, [tickets, onUnreadCount]);
+
+  // Auto-open ticket when triggered from parent banner
+  useEffect(() => {
+    if (!autoOpenTicketId || !tickets.length) return;
+    const target = tickets.find(t => t.id === autoOpenTicketId);
+    if (target) {
+      setSelectedTicket(target);
+      // Wait for React to re-render the ticket detail view before scrolling
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          const el = supportPanelRef.current;
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+            const navbarHeight = 80;
+            window.scrollTo({ top: rect.top + scrollTop - navbarHeight, behavior: 'smooth' });
+          }
+        });
+      }, 100);
+    }
+  }, [autoOpenTicketId, tickets]);
+
   // ── Render ──
   return (
-    <div className="rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+    <div ref={supportPanelRef} className="rounded-sm border border-nano-border bg-nano-panel/20 p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -310,18 +496,18 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
         </div>
       ) : selectedTicket ? (
         /* ── Ticket Detail View ── */
-        <div>
+        <div className="flex flex-col" style={{ maxHeight: 'clamp(500px, 70vh, 800px)' }}>
           {/* Back button */}
           <button
             onClick={() => setSelectedTicket(null)}
-            className="flex items-center gap-2 text-xs text-nano-text hover:text-white transition-colors mb-4 group"
+            className="flex items-center gap-2 text-xs text-nano-text hover:text-white transition-colors mb-3 group flex-shrink-0"
           >
             <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" />
             Back to all tickets
           </button>
 
           {/* Ticket header */}
-          <div className="border border-nano-border/50 bg-black/30 p-4 mb-4">
+          <div className="border border-nano-border/50 bg-black/30 p-4 mb-0 flex-shrink-0">
             <div className="flex items-start justify-between mb-2">
               <div>
                 <h4 className="text-white font-bold text-base">
@@ -350,78 +536,119 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
             </div>
           </div>
 
-          {/* Messages thread */}
-          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
-            {sortedMessages.length > 0 ? (
-              sortedMessages.map((msg) => {
-                const isYou = msg.direction === 'inbound';
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${isYou ? 'items-end' : 'items-start'}`}
+          {/* Messages thread — scrollable region */}
+          <div 
+            ref={messagesContainerRef} 
+            onScroll={() => {
+              if (showNewMessageToast) {
+                const container = messagesContainerRef.current;
+                if (container) {
+                  const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+                  if (isNearBottom) {
+                    setShowNewMessageToast(false);
+                    shouldAutoScrollRef.current = true;
+                  }
+                }
+              }
+            }}
+            className="flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar relative border-x border-nano-border/50 bg-black/20"
+            style={{ scrollBehavior: 'smooth' }}
+          >
+            <div className="space-y-3 p-4">
+              {showNewMessageToast && (
+                <div className="sticky top-2 z-10 flex justify-center w-full">
+                  <button 
+                    onClick={() => {
+                      setShowNewMessageToast(false);
+                      shouldAutoScrollRef.current = true;
+                      scrollToLatestMessage('smooth');
+                    }}
+                    className="bg-nano-yellow text-black text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full shadow-lg hover:bg-nano-gold transition-colors flex items-center gap-1.5 border border-black/10"
                   >
+                    New message ↓
+                  </button>
+                </div>
+              )}
+              {sortedMessages.length > 0 ? (
+                sortedMessages.map((msg) => {
+                  const isYou = msg.direction === 'inbound';
+                  return (
                     <div
-                      className={`p-4 rounded-lg text-sm max-w-[85%] ${
-                        isYou
-                          ? 'bg-nano-yellow/10 border border-nano-yellow/20 text-white rounded-tr-none'
-                          : 'bg-white/[0.05] border border-white/10 text-gray-200 rounded-tl-none'
-                      }`}
+                      key={msg.id}
+                      className={`flex flex-col ${isYou ? 'items-end' : 'items-start'}`}
                     >
-                      <div className={`flex items-center gap-2 mb-2 ${isYou ? 'flex-row-reverse' : 'flex-row'}`}>
-                        <span
-                          className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                            isYou
-                              ? 'text-nano-yellow bg-nano-yellow/10'
-                              : 'text-gray-300 bg-white/10'
-                          }`}
-                        >
-                          {isYou ? 'You' : 'Support'}
-                        </span>
-                        <span className="text-[10px] text-nano-text/50 font-mono">
-                          {new Date(msg.created_at).toLocaleString()}
-                        </span>
+                      <div
+                        className={`p-4 rounded-lg text-sm max-w-[85%] ${
+                          isYou
+                            ? 'bg-nano-yellow/10 border border-nano-yellow/20 text-white rounded-tr-none'
+                            : 'bg-white/[0.05] border border-white/10 text-gray-200 rounded-tl-none'
+                        }`}
+                      >
+                        <div className={`flex items-center gap-2 mb-2 ${isYou ? 'flex-row-reverse' : 'flex-row'}`}>
+                          <span
+                            className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                              isYou
+                                ? 'text-nano-yellow bg-nano-yellow/10'
+                                : 'text-gray-300 bg-white/10'
+                            }`}
+                          >
+                            {isYou ? 'You' : 'Support'}
+                          </span>
+                          <span className="text-[10px] text-nano-text/50 font-mono">
+                            {new Date(msg.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <pre className="font-sans whitespace-pre-wrap leading-relaxed text-[13px]">
+                          {msg.body || 'No message content.'}
+                        </pre>
                       </div>
-                      <pre className="font-sans whitespace-pre-wrap leading-relaxed text-[13px]">
-                        {msg.body || 'No message content.'}
-                      </pre>
                     </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="text-nano-text/50 text-xs text-center py-4 italic">
-                No messages in this ticket.
-              </div>
-            )}
-            <div ref={messagesEndRef} />
+                  );
+                })
+              ) : (
+                <div className="text-nano-text/50 text-xs text-center py-4 italic">
+                  No messages in this ticket.
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
           </div>
 
-          {/* Reply UI */}
-          <div className="mt-4 pt-4 border-t border-nano-border/50 flex flex-col gap-3">
+          {/* Reply composer — sticky at bottom */}
+          <div className="flex-shrink-0 p-4 border border-nano-border/50 border-t-0 bg-nano-panel/30 flex flex-col gap-2">
             {replyError && (
-              <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-sm">
+              <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-sm">
                 <AlertCircle size={14} className="text-red-400 shrink-0 mt-0.5" />
                 <p className="text-xs text-red-300">{replyError}</p>
               </div>
             )}
-            <textarea
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              disabled={isReplying}
-              placeholder="Type your reply here..."
-              maxLength={5000}
-              className="w-full bg-black/50 border border-nano-border/80 text-white text-sm font-sans p-3 rounded focus:outline-none focus:border-nano-yellow transition-colors resize-none disabled:opacity-50 min-h-[90px]"
-            />
-            <div className="flex justify-end">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!replyText.trim() || isReplying) return;
+                    handleSendReply();
+                  }
+                }}
+                disabled={isReplying}
+                placeholder="Type your reply… (Enter to send, Shift+Enter for new line)"
+                maxLength={5000}
+                className="flex-1 bg-black/50 border border-nano-border/80 text-white text-sm font-sans p-3 rounded focus:outline-none focus:border-nano-yellow transition-colors resize-none disabled:opacity-50"
+                rows={2}
+              />
               <button
                 onClick={handleSendReply}
                 disabled={isReplying || !replyText.trim()}
-                className="px-5 py-2 bg-nano-yellow text-black text-xs font-bold uppercase tracking-widest rounded hover:bg-nano-gold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-4 py-2.5 bg-nano-yellow text-black text-xs font-bold uppercase tracking-widest rounded hover:bg-nano-gold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 flex-shrink-0"
               >
                 {isReplying ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                {isReplying ? 'Sending...' : 'Send Reply'}
+                {isReplying ? 'Sending…' : 'Send'}
               </button>
             </div>
+            <div className="text-[10px] text-nano-text/40 text-right">Enter to send · Shift+Enter for new line</div>
           </div>
         </div>
       ) : (
@@ -563,8 +790,8 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session }) => {
                       Select a category
                     </option>
                     {INQUIRY_TYPES.map((type) => (
-                      <option key={type} value={type} className="bg-black text-white">
-                        {type}
+                      <option key={type.value} value={type.value} className="bg-black text-white">
+                        {type.label}
                       </option>
                     ))}
                   </select>

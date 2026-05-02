@@ -9,13 +9,27 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const ALLOWED_INQUIRY_TYPES = [
-  'Product Support',
-  'Sales / Licensing',
-  'Hosted Credits or Billing',
-  'BYOK License Questions',
-  'General Question',
-];
+const CATEGORY_MAP: Record<string, string> = {
+  'Product Support': 'general_support',
+  'Sales / Licensing': 'license_activation',
+  'Hosted Credits or Billing': 'hosted_credits',
+  'BYOK License Questions': 'byok_setup',
+  'General Question': 'general_support',
+  // Full dashboard categories (slug → slug passthrough)
+  'billing': 'billing',
+  'license_activation': 'license_activation',
+  'hosted_credits': 'hosted_credits',
+  'byok_setup': 'byok_setup',
+  'generation_failed': 'generation_failed',
+  'app_bug': 'app_bug',
+  'download_install': 'download_install',
+  'feature_question': 'feature_question',
+  'account_access': 'account_access',
+  'refund_cancellation': 'refund_cancellation',
+  'general_support': 'general_support',
+};
+
+const ALLOWED_INQUIRY_TYPES = Object.keys(CATEGORY_MAP);
 
 function jsonResponse(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -123,6 +137,9 @@ serve(async (req: any) => {
     if (subject.length > 200) return jsonResponse(400, { ok: false, error: 'Subject too long' });
     if (message.length > 5000) return jsonResponse(400, { ok: false, error: 'Message too long' });
 
+    // ── Resolve category slug ──
+    const category = CATEGORY_MAP[inquiryType] || 'general_support';
+
     // ── Service role client (bypasses RLS) ──
     const sb = createClient(supabaseUrl, serviceKey);
 
@@ -147,6 +164,7 @@ serve(async (req: any) => {
 
     // ── Create conversation ──
     const ticketId = generateTicketId();
+    const now = new Date().toISOString();
     const { data: convo, error: convoErr } = await sb
       .from('crm_conversations')
       .insert({
@@ -155,8 +173,11 @@ serve(async (req: any) => {
         ticket_id: ticketId,
         subject: subject,
         inquiry_type: inquiryType,
+        category: category,
         status: 'new',
+        priority: 'normal',
         source: 'dashboard',
+        last_customer_message_at: now,
       })
       .select('id')
       .single();
@@ -176,12 +197,33 @@ serve(async (req: any) => {
         sender_email: userEmail,
         sender_name: userName,
         body: message,
-        raw_payload: { subject, inquiryType, source: 'account_dashboard', user_id: userId },
+        raw_payload: { subject, inquiryType, category, source: 'account_dashboard', user_id: userId },
       });
 
     if (msgErr) {
       console.error('CRM message insert failed:', msgErr.message);
       return jsonResponse(500, { ok: false, error: 'Failed to save message' });
+    }
+
+    // ── Send customer confirmation email (fail-soft, no message body — dashboard-first) ──
+    if (resendApiKey) {
+      try {
+        const confirmSubject = `[${ticketId}] Cast Director Studio Support Ticket Opened`;
+        const confirmBody = `Hello,\n\nYour Cast Director Studio support ticket has been opened.\n\nTicket: ${ticketId}\n\nPlease log into your account dashboard to view your ticket and any future replies:\nhttps://castdirectorstudio.com/account\n\nCast Director Studio Support\nsupport@castdirectorstudio.com`;
+
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${resendApiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'Cast Director Studio Support <support@castdirectorstudio.com>',
+            to: [userEmail],
+            subject: confirmSubject,
+            text: confirmBody,
+          }),
+        });
+      } catch (e: any) {
+        console.error('Customer confirmation email failed (fail-soft):', e.message);
+      }
     }
 
     // ── Send admin notification (fail-soft) ──

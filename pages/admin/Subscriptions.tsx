@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase, invokeAuthenticatedFunction } from '../../lib/supabase';
 import AdminSearchFilter from '../../components/AdminSearchFilter';
 import { useNavigate } from 'react-router-dom';
 import { ExternalLink, Mail, Loader2 } from 'lucide-react';
@@ -64,8 +64,10 @@ const SubscriptionsAdmin: React.FC = () => {
   const handleTransactionalResend = async (subId: string, contactId: string) => {
     setResendingState(prev => ({...prev, [subId]: true}));
     try {
-      const { data, error: invokeErr } = await supabase.functions.invoke('resend-transactional-email', {
-        body: { action: 'subscription_confirmation', contact_id: contactId, entity_id: subId }
+      const { data, error: invokeErr } = await invokeAuthenticatedFunction('resend-transactional-email', {
+        action: 'subscription_confirmation',
+        contact_id: contactId,
+        entity_id: subId
       });
       if (invokeErr) throw new Error(invokeErr.message);
       if (data?.error) throw new Error(data.error);

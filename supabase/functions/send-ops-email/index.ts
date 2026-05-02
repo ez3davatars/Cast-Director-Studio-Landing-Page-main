@@ -20,32 +20,28 @@ serve(async (req: any) => {
       throw new Error('Missing required fields: contact_id, to, subject, body');
     }
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('Missing authorization header');
-    }
+    const authHeader = req.headers.get('Authorization') || '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) return new Response(JSON.stringify({ error: 'Unauthorized: Auth session missing' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    // 1. Authenticate Request using the Anon Key but with the User's JWT
-    const supabaseClient = createClient(
-      // @ts-ignore
-      Deno.env.get('SUPABASE_URL') ?? '',
-      // @ts-ignore
-      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-    );
+    // 1. Authenticate Request
+    // @ts-ignore
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    // @ts-ignore
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    if (!serviceKey) throw new Error('Internal Configuration Error: SUPABASE_SERVICE_ROLE_KEY missing');
 
-    const token = authHeader.replace('Bearer ', '');
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseClient.auth.getUser(token);
+    const sbAdmin = createClient(supabaseUrl, serviceKey);
+    const { data: { user }, error: userError } = await sbAdmin.auth.getUser(token);
 
     if (userError || !user) {
-      throw new Error('Unauthorized');
+      return new Response(JSON.stringify({ error: `Unauthorized: ${userError?.message || 'No user found'}` }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // 2. Validate Admin Privileges precisely securely
     if (user.app_metadata?.is_admin !== true) {
-      throw new Error('Forbidden: Requires Admin Role');
+      return new Response(JSON.stringify({ error: 'Forbidden: Requires Admin Role' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
     }
 
     // 3. Dispatch via Resend
@@ -60,9 +56,8 @@ serve(async (req: any) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from: 'EZ3D Avatars <sales@castdirectorstudio.com>',
+        from: 'Cast Director Studio Support <support@castdirectorstudio.com>',
         to: [to],
-        reply_to: 'support@inbox.castdirectorstudio.com',
         subject: subject,
         text: body,
       })

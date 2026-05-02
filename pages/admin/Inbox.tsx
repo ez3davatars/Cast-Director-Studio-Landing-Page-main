@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase, invokeAuthenticatedFunction } from '../../lib/supabase';
 import { Inbox as InboxIcon, RefreshCw, Send, X, ExternalLink, Loader2 } from 'lucide-react';
 import AdminSearchFilter from '../../components/AdminSearchFilter';
 import { useNavigate } from 'react-router-dom';
@@ -89,13 +89,11 @@ const InboxAdmin: React.FC = () => {
         : `Re: ${selectedMessage.subject || 'Support Inquiry'}`;
 
     try {
-      const { data, error: invokeErr } = await supabase.functions.invoke('send-ops-email', {
-        body: {
-          contact_id: selectedMessage.contact_id || null, // Will gracefully default to null in DB if orphaned
-          to: selectedMessage.from_email,
-          subject: replySubject,
-          body: replyBody + `\n\n--- Original Message ---\nFrom: ${selectedMessage.from_email}\nReceived: ${new Date(selectedMessage.received_at).toLocaleString()}\n\n${selectedMessage.text_content}`
-        }
+      const { data, error: invokeErr } = await invokeAuthenticatedFunction('send-ops-email', {
+        contact_id: selectedMessage.contact_id || null, // Will gracefully default to null in DB if orphaned
+        to: selectedMessage.from_email,
+        subject: replySubject,
+        body: replyBody + `\n\n--- Original Message ---\nFrom: ${selectedMessage.from_email}\nReceived: ${new Date(selectedMessage.received_at).toLocaleString()}\n\n${selectedMessage.text_content}`
       });
 
       if (invokeErr) throw new Error(invokeErr.message);

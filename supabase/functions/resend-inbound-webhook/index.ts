@@ -107,11 +107,16 @@ serve(async (req: any) => {
               },
             });
 
-          // Re-open the conversation if it was resolved or closed
-          if (convo.status === 'resolved' || convo.status === 'closed') {
+          // Re-open the conversation if it was resolved, closed, or waiting_on_customer
+          if (convo.status === 'resolved' || convo.status === 'closed' || convo.status === 'waiting_on_customer') {
             await supabaseAdmin
               .from('crm_conversations')
-              .update({ status: 'open' })
+              .update({ status: 'new', last_customer_message_at: new Date().toISOString() })
+              .eq('id', convo.id);
+          } else {
+            await supabaseAdmin
+              .from('crm_conversations')
+              .update({ last_customer_message_at: new Date().toISOString() })
               .eq('id', convo.id);
           }
 
@@ -188,8 +193,11 @@ async function insertGeneralCrmMessage(
         ticket_id: ticketId,
         subject: subject,
         inquiry_type: 'Inbound Email',
+        category: 'general_support',
+        priority: 'normal',
         status: 'new',
         source: 'inbound_email',
+        last_customer_message_at: new Date().toISOString(),
       })
       .select('id')
       .single();

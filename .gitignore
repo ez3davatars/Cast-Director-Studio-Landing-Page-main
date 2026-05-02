@@ -23,6 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+.env
+.env.local
+.env.example
+
 # Test/debug scripts and output (never commit)
 *.cjs
 !proxy.cjs

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../../lib/supabase';
-import { ChevronLeft, AlertTriangle, Send, X, Loader2, Mail, Coins } from 'lucide-react';
+import { supabase, invokeAuthenticatedFunction } from '../../lib/supabase';
+import { ChevronLeft, AlertTriangle, Send, X, Loader2, Mail, Coins, ShieldAlert, ShieldCheck, ShieldOff, PauseCircle, PlayCircle, XCircle } from 'lucide-react';
 
 const CustomerDetailAdmin: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -26,13 +26,140 @@ const CustomerDetailAdmin: React.FC = () => {
 
   const [resendingState, setResendingState] = useState<{ [key: string]: boolean }>({});
 
+  const [isForceClaimOpen, setIsForceClaimOpen] = useState(false);
+  const [isForceClaiming, setIsForceClaiming] = useState(false);
+  const [forceClaimResult, setForceClaimResult] = useState<any>(null);
+  const [forceClaimError, setForceClaimError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [sendResetResult, setSendResetResult] = useState<string | null>(null);
+  const [sendResetError, setSendResetError] = useState<string | null>(null);
+
+  // Account Status State
+  const [accountStatus, setAccountStatus] = useState<string>('active');
+  const [accountStatusReason, setAccountStatusReason] = useState<string | null>(null);
+  const [accountStatusUpdatedAt, setAccountStatusUpdatedAt] = useState<string | null>(null);
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [statusAction, setStatusAction] = useState<'paused' | 'canceled' | 'active'>('paused');
+  const [statusReason, setStatusReason] = useState('');
+  const [statusSendEmail, setStatusSendEmail] = useState(true);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [statusUpdateResult, setStatusUpdateResult] = useState<string | null>(null);
+  const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
+
+  const handleUpdateAccountStatus = async () => {
+    if ((statusAction === 'paused' || statusAction === 'canceled') && statusReason.trim().length < 5) {
+      setStatusUpdateError('Reason is required and must be at least 5 characters.');
+      return;
+    }
+
+    setIsUpdatingStatus(true);
+    setStatusUpdateError(null);
+    setStatusUpdateResult(null);
+
+    try {
+      // Verify we have a valid admin session before calling the Edge Function
+      const { data: { session: activeSession } } = await supabase.auth.getSession();
+      if (!activeSession?.access_token) {
+        throw new Error('Admin session expired. Please refresh the page and sign in again.');
+      }
+      console.log('[AccountStatus] Session valid, invoking Edge Function...');
+      console.log('[AccountStatus] Target:', contact.email, 'Action:', statusAction);
+
+      const { data, error: invokeErr } = await invokeAuthenticatedFunction('admin-update-account-status', {
+        customer_email: contact.email,
+        status: statusAction,
+        reason: statusReason.trim() || null,
+        send_email: statusSendEmail,
+      });
+
+      console.log('[AccountStatus] Response:', data, 'Error:', invokeErr);
+
+      if (invokeErr) throw new Error(invokeErr.message || 'Function invocation failed');
+      if (data?.error) throw new Error(data.error);
+
+      setAccountStatus(data.new_status);
+      setAccountStatusReason(statusReason.trim() || null);
+      setAccountStatusUpdatedAt(new Date().toISOString());
+
+      let msg = data.message || 'Status updated.';
+      if (data.warning) msg += ` ⚠️ ${data.warning}`;
+      if (data.stripe_warning) msg += ` ⚠️ ${data.stripe_warning}`;
+      setStatusUpdateResult(msg);
+
+      setTimeout(() => {
+        setStatusUpdateResult(null);
+        setIsStatusModalOpen(false);
+        setStatusReason('');
+      }, 4000);
+    } catch (e: any) {
+      setStatusUpdateError(e.message || 'Failed to update account status');
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  const openStatusModal = (action: 'paused' | 'canceled' | 'active') => {
+    setStatusAction(action);
+    setStatusReason('');
+    setStatusSendEmail(true);
+    setStatusUpdateResult(null);
+    setStatusUpdateError(null);
+    setIsStatusModalOpen(true);
+  };
+
+  const handleSendPasswordReset = async () => {
+    setIsSendingReset(true);
+    setSendResetError(null);
+    setSendResetResult(null);
+
+    try {
+      const { data, error: invokeErr } = await invokeAuthenticatedFunction('admin-send-password-reset', { 
+        email: contact.email 
+      });
+
+      if (invokeErr) throw new Error(invokeErr.message || "Function invocation failed");
+      if (data?.error) throw new Error(data.error);
+
+      setSendResetResult(data.message || "Password reset email sent.");
+      setTimeout(() => setSendResetResult(null), 5000);
+    } catch (e: any) {
+      setSendResetError(e.message || "Failed to send reset email");
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
+  const handleForceClaim = async () => {
+    setIsForceClaiming(true);
+    setForceClaimError(null);
+    setForceClaimResult(null);
+
+    try {
+      const { data, error: invokeErr } = await invokeAuthenticatedFunction('admin-force-claim', { 
+        email: contact.email 
+      });
+
+      if (invokeErr) throw new Error(invokeErr.message || "Function invocation failed");
+      if (data?.error) throw new Error(data.error);
+
+      setForceClaimResult(data);
+      setRefreshKey(prev => prev + 1);
+    } catch (e: any) {
+      setForceClaimError(e.message || "Failed to force claim account");
+    } finally {
+      setIsForceClaiming(false);
+    }
+  };
+
   const handleTransactionalResend = async (action: string, entity_id: string) => {
     const key = `${action}_${entity_id}`;
     setResendingState(prev => ({...prev, [key]: true}));
     
     try {
-      const { data, error: invokeErr } = await supabase.functions.invoke('resend-transactional-email', {
-        body: { action, contact_id: contact.id, entity_id }
+      const { data, error: invokeErr } = await invokeAuthenticatedFunction('resend-transactional-email', {
+        action, contact_id: contact.id, entity_id 
       });
       if (invokeErr) throw new Error(invokeErr.message);
       if (data?.error) throw new Error(data.error);
@@ -95,12 +222,32 @@ const CustomerDetailAdmin: React.FC = () => {
         const assembledContact = { ...contactData, stripe_customer_id: stripeCustomerId };
         setContact(assembledContact);
 
-        if (contactData.user_id) {
+        let resolvedUserId = contactData.user_id;
+        if (!resolvedUserId) {
            try {
-             const { data: profileData } = await supabase.from('profiles').select('credit_balance').eq('id', contactData.user_id).single();
+             const { data: crmData } = await supabase.from('crm_contacts').select('user_id').eq('email', contactData.email).maybeSingle();
+             if (crmData?.user_id) resolvedUserId = crmData.user_id;
+           } catch(e) {}
+        }
+
+        if (resolvedUserId) {
+           try {
+             const { data: profileData } = await supabase.from('profiles').select('credit_balance').eq('id', resolvedUserId).maybeSingle();
              if (profileData) setCreditBalance(profileData.credit_balance);
            } catch(e) {
              warnings.push("profiles.credit_balance");
+           }
+
+           // Fetch account status separately — columns may not exist if migration hasn't run yet
+           try {
+             const { data: statusData } = await supabase.from('profiles').select('account_status, account_status_reason, account_status_updated_at').eq('id', resolvedUserId).maybeSingle();
+             if (statusData) {
+               if (statusData.account_status) setAccountStatus(statusData.account_status);
+               if (statusData.account_status_reason) setAccountStatusReason(statusData.account_status_reason);
+               if (statusData.account_status_updated_at) setAccountStatusUpdatedAt(statusData.account_status_updated_at);
+             }
+           } catch(e) {
+             // account_status columns may not exist yet — safe to ignore
            }
         }
 
@@ -217,7 +364,7 @@ const CustomerDetailAdmin: React.FC = () => {
     };
 
     if (id) fetchData();
-  }, [id]);
+  }, [id, refreshKey]);
 
   if (loading) return <div className="p-8 text-white font-mono animate-pulse">Assembling Operations Hub...</div>;
   if (error) return <div className="p-8 text-red-500 font-mono bg-red-500/10 border border-red-500/30 rounded">Contact resolution failed: {error}</div>;
@@ -300,26 +447,79 @@ const CustomerDetailAdmin: React.FC = () => {
     setSendError(null);
 
     try {
-      const { data, error: invokeErr } = await supabase.functions.invoke('send-ops-email', {
-        body: {
-          contact_id: contact.id,
-          to: contact.email,
+      // 1. Generate ticket ID
+      const now = new Date();
+      const datePart = now.toISOString().slice(2, 10).replace(/-/g, '');
+      const randPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const ticketId = `CDS-${datePart}-${randPart}`;
+
+      // 2. Upsert CRM contact (crm_conversations FK points to crm_contacts, not contacts)
+      const { data: crmContact, error: crmContactErr } = await supabase
+        .from('crm_contacts')
+        .upsert({
+          email: contact.email,
+          name: contact.name || contact.email,
+          user_id: contact.user_id || null,
+          source: 'admin_outreach',
+        }, { onConflict: 'email' })
+        .select('id')
+        .single();
+
+      if (crmContactErr || !crmContact) throw new Error(crmContactErr?.message || 'Failed to create CRM contact');
+
+      // 3. Create CRM conversation
+      const { data: convo, error: convoErr } = await supabase
+        .from('crm_conversations')
+        .insert({
+          contact_id: crmContact.id,
+          linked_user_id: contact.user_id || null,
+          ticket_id: ticketId,
           subject: composeSubject,
-          body: composeBody
-        }
+          inquiry_type: 'Admin Outreach',
+          category: 'general_support',
+          priority: 'normal',
+          status: 'waiting_on_customer',
+          source: 'admin_outreach',
+          last_admin_reply_at: now.toISOString(),
+        })
+        .select('id')
+        .single();
+
+      if (convoErr || !convo) throw new Error(convoErr?.message || 'Failed to create CRM conversation');
+
+      // 4. Insert admin message
+      const { error: msgErr } = await supabase
+        .from('crm_messages')
+        .insert({
+          conversation_id: convo.id,
+          direction: 'outbound',
+          source: 'admin_outreach',
+          sender_name: 'Support',
+          sender_email: 'support@castdirectorstudio.com',
+          body: composeBody,
+          raw_payload: { source: 'admin_outreach', subject: composeSubject },
+        });
+
+      if (msgErr) throw new Error(msgErr.message || 'Failed to save CRM message');
+
+      // 5. Send notification-only email (no message body)
+      const notifBody = `Hello,\n\nYou have a new message from Cast Director Studio Support.\n\nTicket: ${ticketId}\n\nPlease log into your account dashboard to view the message and respond if needed:\nhttps://castdirectorstudio.com/account\n\nCast Director Studio Support\nsupport@castdirectorstudio.com`;
+
+      await invokeAuthenticatedFunction('send-ops-email', {
+        contact_id: crmContact.id,
+        to: contact.email,
+        subject: `[${ticketId}] Cast Director Studio Support`,
+        body: notifBody,
       });
 
-      if (invokeErr) throw new Error(invokeErr.message || "Function invocation failed");
-      if (data?.error) throw new Error(data.error);
-
-      // Instantly inject into visual history
+      // 6. Update UI
       setEmails(prev => [
         {
-          id: data.messageId || 'pending-id',
-          subject: composeSubject,
-          provider_message_id: data.messageId,
-          created_at: new Date().toISOString(),
-          contact_id: contact.id
+          id: convo.id,
+          subject: `[${ticketId}] ${composeSubject}`,
+          provider_message_id: ticketId,
+          created_at: now.toISOString(),
+          contact_id: crmContact.id
         },
         ...prev
       ]);
@@ -328,16 +528,16 @@ const CustomerDetailAdmin: React.FC = () => {
       setComposeSubject('');
       setComposeBody('');
     } catch (e: any) {
-      setSendError(e.message || "Failed to dispatch email");
+      setSendError(e.message || "Failed to create support ticket");
     } finally {
       setIsSending(false);
     }
   };
 
   const handleAdjustCredits = async () => {
-    const amountNum = Number(adjustAmount);
+    const amountNum = parseInt(adjustAmount, 10);
     if (!adjustAmount || isNaN(amountNum)) {
-      setAdjustError("Amount must be a valid number.");
+      setAdjustError("Amount must be a valid integer.");
       return;
     }
     if (!adjustReason.trim()) {
@@ -352,14 +552,34 @@ const CustomerDetailAdmin: React.FC = () => {
     setIsAdjusting(true);
     setAdjustError(null);
 
+    const normalizedEmail = contact.email?.trim().toLowerCase();
+    const reason = adjustReason.trim();
+
+    // Dev-only diagnostics
+    console.log("[Adjust Credits] email:", normalizedEmail);
+    console.log("[Adjust Credits] amountNum:", amountNum, "type:", typeof amountNum);
+    console.log("[Adjust Credits] reason present:", !!reason);
+    console.log("[Adjust Credits] contact.user_id:", contact.user_id);
+    console.log("[Adjust Credits] current creditBalance:", creditBalance);
+
     try {
       const { data, error: rpcErr } = await supabase.rpc('admin_add_credits', {
-        p_contact_email: contact.email,
+        p_contact_email: normalizedEmail,
         p_amount: amountNum,
-        p_reason: adjustReason
+        p_reason: reason,
       });
 
-      if (rpcErr) throw new Error(rpcErr.message);
+      if (rpcErr) {
+        console.error("[Adjust Credits] RPC Error:", {
+          message: rpcErr.message,
+          code: rpcErr.code,
+          details: rpcErr.details,
+          hint: rpcErr.hint,
+        });
+        throw new Error(rpcErr.message);
+      }
+
+      console.log("[Adjust Credits] RPC success, new balance:", data);
 
       setCreditBalance(data as number);
       setIsAdjustCreditsOpen(false);
@@ -386,31 +606,145 @@ const CustomerDetailAdmin: React.FC = () => {
             <h2 className="text-2xl font-bold font-mono tracking-wide">Customer Overview</h2>
             <div className="flex items-center gap-4 mt-1">
               <div className="text-sm font-mono text-nano-yellow">{contact.email}</div>
-              {creditBalance !== null && (
+              {creditBalance !== null ? (
                 <div className="flex items-center gap-1.5 text-xs font-mono bg-nano-yellow/10 text-nano-yellow px-2 py-0.5 rounded border border-nano-yellow/20">
                   <Coins size={12} /> {creditBalance} Credits
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-xs font-mono bg-gray-500/10 text-gray-500 px-2 py-0.5 rounded border border-gray-500/20" title="Account not claimed yet">
+                  <Coins size={12} /> Unclaimed
+                </div>
+              )}
+              {accountStatus === 'active' && (
+                <div className="flex items-center gap-1.5 text-xs font-mono bg-green-500/10 text-green-400 px-2 py-0.5 rounded border border-green-500/20">
+                  <ShieldCheck size={12} /> Active
+                </div>
+              )}
+              {accountStatus === 'paused' && (
+                <div className="flex items-center gap-1.5 text-xs font-mono bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                  <PauseCircle size={12} /> Paused
+                </div>
+              )}
+              {accountStatus === 'canceled' && (
+                <div className="flex items-center gap-1.5 text-xs font-mono bg-red-500/10 text-red-400 px-2 py-0.5 rounded border border-red-500/20">
+                  <XCircle size={12} /> Canceled
                 </div>
               )}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {creditBalance !== null && (
+          {creditBalance === null && (
             <button
-              onClick={() => setIsAdjustCreditsOpen(true)}
+              onClick={() => {
+                setIsForceClaimOpen(true);
+                setForceClaimResult(null);
+                setForceClaimError(null);
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-black border border-nano-border text-white font-bold text-xs uppercase tracking-wider rounded-md hover:bg-white/5 transition-colors"
             >
-              <Coins size={14} className="text-nano-yellow" /> Adjust Credits
+               Force Claim Account
             </button>
           )}
+          {contact?.email && (
+            <button
+              onClick={handleSendPasswordReset}
+              disabled={isSendingReset}
+              className="flex items-center gap-2 px-4 py-2 bg-black border border-nano-border text-white font-bold text-xs uppercase tracking-wider rounded-md hover:bg-white/5 transition-colors disabled:opacity-50"
+            >
+              {isSendingReset ? <Loader2 size={14} className="animate-spin text-nano-yellow" /> : <Mail size={14} className="text-nano-yellow" />}
+              Send Password Reset
+            </button>
+          )}
+          <button
+            onClick={() => setIsAdjustCreditsOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-black border border-nano-border text-white font-bold text-xs uppercase tracking-wider rounded-md hover:bg-white/5 transition-colors"
+          >
+            <Coins size={14} className="text-nano-yellow" /> Adjust Credits
+          </button>
           <button
             onClick={() => setIsComposeOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-white text-black font-bold text-xs uppercase tracking-wider rounded-md hover:bg-gray-200 transition-colors"
           >
-            <Send size={14} /> Send Email
+            <Send size={14} /> New Ticket
           </button>
         </div>
       </div>
+
+      {sendResetResult && (
+        <div className="bg-green-500/10 border border-green-500/30 text-green-400 p-4 rounded mb-8 font-mono text-xs font-bold">
+          {sendResetResult}
+        </div>
+      )}
+
+      {statusUpdateResult && (
+        <div className="bg-green-500/10 border border-green-500/30 text-green-400 p-4 rounded mb-8 font-mono text-xs font-bold">
+          {statusUpdateResult}
+        </div>
+      )}
+
+      {statusUpdateError && !isStatusModalOpen && (
+        <div className="bg-red-500/10 border border-red-500/30 text-red-500 p-4 rounded mb-8 font-mono text-xs font-bold">
+          {statusUpdateError}
+        </div>
+      )}
+
+      {/* Account Status Section */}
+      {contact?.user_id && (
+        <div className="bg-nano-panel/30 border border-nano-border rounded p-6 mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-nano-text mb-2">Account Status</h3>
+              <div className="flex items-center gap-3">
+                {accountStatus === 'active' && <span className="text-green-400 font-mono text-sm font-bold">Active</span>}
+                {accountStatus === 'paused' && <span className="text-amber-400 font-mono text-sm font-bold">Paused</span>}
+                {accountStatus === 'canceled' && <span className="text-red-400 font-mono text-sm font-bold">Canceled</span>}
+                {accountStatusUpdatedAt && (
+                  <span className="text-xs text-nano-text">Updated: {new Date(accountStatusUpdatedAt).toLocaleDateString()}</span>
+                )}
+              </div>
+              {accountStatusReason && (accountStatus === 'paused' || accountStatus === 'canceled') && (
+                <div className="mt-2 text-xs text-nano-text bg-black/30 p-2 rounded border border-nano-border">
+                  <span className="font-bold text-white">Reason:</span> {accountStatusReason}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {accountStatus === 'active' && (
+                <>
+                  <button onClick={() => openStatusModal('paused')} className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-xs uppercase tracking-wider rounded hover:bg-amber-500/20 transition-colors">
+                    <PauseCircle size={14} /> Pause
+                  </button>
+                  <button onClick={() => openStatusModal('canceled')} className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-xs uppercase tracking-wider rounded hover:bg-red-500/20 transition-colors">
+                    <ShieldOff size={14} /> Cancel
+                  </button>
+                </>
+              )}
+              {accountStatus === 'paused' && (
+                <>
+                  <button onClick={() => openStatusModal('active')} className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 font-bold text-xs uppercase tracking-wider rounded hover:bg-green-500/20 transition-colors">
+                    <PlayCircle size={14} /> Reactivate
+                  </button>
+                  <button onClick={() => openStatusModal('canceled')} className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-xs uppercase tracking-wider rounded hover:bg-red-500/20 transition-colors">
+                    <ShieldOff size={14} /> Cancel
+                  </button>
+                </>
+              )}
+              {accountStatus === 'canceled' && (
+                <button onClick={() => openStatusModal('active')} className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 font-bold text-xs uppercase tracking-wider rounded hover:bg-green-500/20 transition-colors">
+                  <PlayCircle size={14} /> Reactivate
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sendResetError && (
+        <div className="bg-red-500/10 border border-red-500/30 text-red-500 p-4 rounded mb-8 font-mono text-xs font-bold">
+          {sendResetError}
+        </div>
+      )}
 
       {missingSchema.length > 0 && (
         <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 p-4 rounded mb-8 font-mono text-xs flex items-start gap-3">
@@ -479,7 +813,7 @@ const CustomerDetailAdmin: React.FC = () => {
           <div className="bg-nano-bg border border-nano-border w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="flex justify-between items-center px-6 py-4 border-b border-nano-border bg-black/40">
               <h3 className="font-mono font-bold tracking-wide flex items-center gap-2">
-                <Send size={16} className="text-nano-yellow" /> Operational Dispatch
+                <Send size={16} className="text-nano-yellow" /> New Support Ticket
               </h3>
               <button 
                 onClick={() => !isSending && setIsComposeOpen(false)}
@@ -493,21 +827,18 @@ const CustomerDetailAdmin: React.FC = () => {
             <div className="p-6 flex-1 overflow-y-auto space-y-4 font-mono text-sm">
               <div className="grid grid-cols-[80px_1fr] items-center gap-2">
                 <span className="text-gray-500 text-xs uppercase">From:</span>
-                <span className="text-gray-300 bg-white/5 py-1.5 px-3 rounded text-xs select-all">EZ3D Avatars &lt;sales@castdirectorstudio.com&gt;</span>
-              </div>
-              <div className="grid grid-cols-[80px_1fr] items-center gap-2">
-                <span className="text-gray-500 text-xs uppercase">Reply-To:</span>
-                <span className="text-gray-300 bg-white/5 py-1.5 px-3 rounded text-xs select-all">support@castdirectorstudio.com</span>
+                <span className="text-gray-300 bg-white/5 py-1.5 px-3 rounded text-xs select-all">Cast Director Studio Support &lt;support@castdirectorstudio.com&gt;</span>
               </div>
               <div className="grid grid-cols-[80px_1fr] items-center gap-2">
                 <span className="text-gray-500 text-xs uppercase">To:</span>
                 <span className="text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/20 py-1.5 px-3 rounded font-bold">{contact.email}</span>
               </div>
+              <p className="text-[10px] text-gray-500 font-mono italic">This message will be posted to the customer's dashboard as a new support ticket. Email will only notify the customer that a ticket was opened — the full message content stays in the dashboard.</p>
 
               <div className="pt-2">
                 <input 
                   type="text" 
-                  placeholder="Subject Line"
+                  placeholder="Subject"
                   value={composeSubject}
                   onChange={e => setComposeSubject(e.target.value)}
                   disabled={isSending}
@@ -517,7 +848,7 @@ const CustomerDetailAdmin: React.FC = () => {
 
               <div>
                 <textarea 
-                  placeholder="Type your message here..."
+                  placeholder="Type your message (visible in customer dashboard)..."
                   value={composeBody}
                   onChange={e => setComposeBody(e.target.value)}
                   disabled={isSending}
@@ -547,7 +878,7 @@ const CustomerDetailAdmin: React.FC = () => {
                 className="px-6 py-2 bg-nano-yellow text-black rounded text-xs uppercase tracking-wider font-bold hover:bg-yellow-400 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
                 {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} 
-                {isSending ? 'Dispatching...' : 'Dispatch'}
+                {isSending ? 'Creating...' : 'Create Ticket'}
               </button>
             </div>
           </div>
@@ -574,7 +905,9 @@ const CustomerDetailAdmin: React.FC = () => {
             <div className="p-6 flex-1 overflow-y-auto space-y-4 font-mono text-sm">
               <div className="grid grid-cols-[100px_1fr] items-center gap-2">
                 <span className="text-gray-500 text-xs uppercase">Current:</span>
-                <span className="text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/20 py-1.5 px-3 rounded font-bold">{creditBalance}</span>
+                <span className="text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/20 py-1.5 px-3 rounded font-bold">
+                  {creditBalance !== null ? creditBalance : 'Unclaimed Account'}
+                </span>
               </div>
 
               <div className="pt-2">
@@ -624,6 +957,173 @@ const CustomerDetailAdmin: React.FC = () => {
               >
                 {isAdjusting ? <Loader2 size={16} className="animate-spin" /> : <Coins size={16} />} 
                 {isAdjusting ? 'Applying...' : 'Apply Adjustment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Force Claim Modal */}
+      {isForceClaimOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-nano-bg border border-nano-border w-full max-w-md rounded-xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-nano-border bg-black/40">
+              <h3 className="font-mono font-bold tracking-wide flex items-center gap-2">
+                <AlertTriangle size={16} className="text-nano-yellow" /> Force Claim Account
+              </h3>
+              <button 
+                onClick={() => !isForceClaiming && setIsForceClaimOpen(false)}
+                className="text-gray-400 hover:text-white"
+                disabled={isForceClaiming}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 flex-1 overflow-y-auto space-y-4 font-mono text-sm">
+              {!forceClaimResult ? (
+                <>
+                  <p className="text-gray-300">
+                    This will create or locate a Supabase account for <strong className="text-white">{contact.email}</strong>, link orphaned purchases to that account, and send a password setup/reset email.
+                  </p>
+                  <p className="text-yellow-400 font-bold text-xs mt-2">
+                    Continue?
+                  </p>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <div className="p-3 bg-green-500/10 border border-green-500/30 text-green-400 rounded text-xs font-bold">
+                    {forceClaimResult.message}
+                  </div>
+                  <div className="bg-black/50 p-3 rounded border border-nano-border text-[10px] space-y-1 text-gray-400">
+                    <div>Orders Linked: {forceClaimResult.details?.orders || 0}</div>
+                    <div>Subscriptions Linked: {forceClaimResult.details?.subscriptions || 0}</div>
+                    <div>Licenses Linked: {forceClaimResult.details?.licenses || 0}</div>
+                    <div>Downloads Linked: {forceClaimResult.details?.downloads || 0}</div>
+                    <div>Contacts Linked: {forceClaimResult.details?.contacts || 0}</div>
+                  </div>
+                </div>
+              )}
+
+              {forceClaimError && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-500 p-3 rounded text-xs">
+                  {forceClaimError}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-nano-border bg-black/40 px-6 py-4 flex justify-end gap-3">
+              {!forceClaimResult ? (
+                <>
+                  <button 
+                    onClick={() => setIsForceClaimOpen(false)}
+                    disabled={isForceClaiming}
+                    className="px-4 py-2 border border-nano-border text-gray-300 hover:bg-white/5 rounded text-xs uppercase tracking-wider font-bold transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleForceClaim}
+                    disabled={isForceClaiming}
+                    className="px-6 py-2 bg-nano-yellow text-black rounded text-xs uppercase tracking-wider font-bold hover:bg-yellow-400 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isForceClaiming ? <Loader2 size={16} className="animate-spin" /> : <AlertTriangle size={16} />} 
+                    {isForceClaiming ? 'Claiming...' : 'Force Claim'}
+                  </button>
+                </>
+              ) : (
+                <button 
+                  onClick={() => setIsForceClaimOpen(false)}
+                  className="px-6 py-2 bg-white/10 text-white border border-white/20 rounded text-xs uppercase tracking-wider font-bold hover:bg-white/20 transition-colors"
+                >
+                  Close
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account Status Modal */}
+      {isStatusModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-nano-panel border border-nano-border rounded-sm max-w-md w-full shadow-2xl">
+            <div className="p-6 border-b border-nano-border">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold font-mono uppercase tracking-wider">
+                  {statusAction === 'paused' && 'Pause Account'}
+                  {statusAction === 'canceled' && 'Cancel Account'}
+                  {statusAction === 'active' && 'Reactivate Account'}
+                </h3>
+                <button onClick={() => setIsStatusModalOpen(false)} className="text-nano-text hover:text-white transition-colors"><X size={20} /></button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {statusAction === 'paused' && (
+                <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 p-3 rounded text-xs">
+                  This will temporarily block account access and send the customer an email with the reason.
+                </div>
+              )}
+              {statusAction === 'canceled' && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-300 p-3 rounded text-xs">
+                  This will cancel account access and may affect active subscriptions. Stripe subscription cancellation must be completed manually.
+                </div>
+              )}
+              {statusAction === 'active' && (
+                <div className="bg-green-500/10 border border-green-500/30 text-green-300 p-3 rounded text-xs">
+                  This will restore account access.
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs text-nano-text uppercase tracking-wide block mb-1">
+                  Reason {statusAction !== 'active' ? '(Required)' : '(Optional)'}
+                </label>
+                <textarea
+                  value={statusReason}
+                  onChange={(e) => setStatusReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-black/30 border border-nano-border text-white text-sm outline-none rounded resize-none h-24"
+                  placeholder={statusAction !== 'active' ? 'Reason for this action (min 5 characters)...' : 'Optional reason...'}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-nano-text cursor-pointer">
+                <input type="checkbox" checked={statusSendEmail} onChange={(e) => setStatusSendEmail(e.target.checked)} className="rounded" />
+                Send notification email to customer
+              </label>
+
+              {statusUpdateError && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-500 p-3 rounded text-xs">
+                  {statusUpdateError}
+                </div>
+              )}
+
+              {statusUpdateResult && (
+                <div className="bg-green-500/10 border border-green-500/30 text-green-400 p-3 rounded text-xs">
+                  {statusUpdateResult}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-nano-border bg-black/40 px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => setIsStatusModalOpen(false)}
+                disabled={isUpdatingStatus}
+                className="px-4 py-2 border border-nano-border text-gray-300 hover:bg-white/5 rounded text-xs uppercase tracking-wider font-bold transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateAccountStatus}
+                disabled={isUpdatingStatus}
+                className={`px-6 py-2 rounded text-xs uppercase tracking-wider font-bold flex items-center gap-2 disabled:opacity-50 transition-colors ${
+                  statusAction === 'paused' ? 'bg-amber-500 text-black hover:bg-amber-400' :
+                  statusAction === 'canceled' ? 'bg-red-500 text-white hover:bg-red-400' :
+                  'bg-green-500 text-black hover:bg-green-400'
+                }`}
+              >
+                {isUpdatingStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+                {isUpdatingStatus ? 'Updating...' : statusAction === 'paused' ? 'Pause Account' : statusAction === 'canceled' ? 'Cancel Account' : 'Reactivate Account'}
               </button>
             </div>
           </div>

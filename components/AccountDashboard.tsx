@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import SupportTickets from './SupportTickets';
 import ClaimPurchasesModal from './ClaimPurchasesModal';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Info, MessageSquare } from 'lucide-react';
 
 interface AccountDashboardProps {
     session: Session;
@@ -24,13 +24,32 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     // Global Recovery flag
     const [hasGuestPurchases, setHasGuestPurchases] = useState(false);
     const [showClaimModal, setShowClaimModal] = useState(false);
-    
+
     // Strict Error State
     const [errorState, setErrorState] = useState<string | null>(null);
+
+    // Account Status
+    const [accountStatus, setAccountStatus] = useState<string>('active');
+    const [accountStatusReason, setAccountStatusReason] = useState<string | null>(null);
 
     // Credit top-up state
     const [topUpLoading, setTopUpLoading] = useState<string | null>(null);
     const [topUpError, setTopUpError] = useState<string | null>(null);
+    const [subError, setSubError] = useState<string | null>(null);
+
+    // Billing Portal state
+    const [portalLoading, setPortalLoading] = useState(false);
+    const [portalError, setPortalError] = useState<string | null>(null);
+
+    // Support ticket notification state
+    const [unreadTicketCount, setUnreadTicketCount] = useState(0);
+    const [unreadTickets, setUnreadTickets] = useState<{ id: string; subject: string }[]>([]);
+    const [autoOpenTicketId, setAutoOpenTicketId] = useState<string | null>(null);
+
+    const handleUnreadCount = useCallback((count: number, tickets: { id: string; subject: string }[]) => {
+        setUnreadTicketCount(count);
+        setUnreadTickets(tickets);
+    }, []);
 
     // BYOK license status
     const [byokError, setByokError] = useState<string | null>(null);
@@ -64,6 +83,14 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     };
 
     const loadDashboard = async () => {
+        // Clean up billing portal return query param
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('billing') === 'return') {
+            params.delete('billing');
+            const cleanSearch = params.toString();
+            window.history.replaceState({}, '', `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}`);
+        }
+
         try {
             setLoading(true);
             setErrorState(null);
@@ -73,7 +100,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const fetchOrders = supabase.from('orders').select('*, order_items(*)').eq('user_id', session.user.id).order('created_at', { ascending: false });
             const fetchLicenses = supabase.from('licenses').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
             const fetchDownloads = supabase.from('downloads').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
-            const fetchSubs = supabase.from('subscriptions').select('id, status, current_period_end, canceled_at, updated_at, metadata').eq('user_id', session.user.id).order('updated_at', { ascending: false }).then(res => res.error ? { data: null, error: res.error } : res);
+            const fetchSubs = supabase.from('subscriptions').select('id, status, product_id, current_period_end, canceled_at, updated_at, metadata').eq('user_id', session.user.id).order('updated_at', { ascending: false }).then(res => res.error ? { data: null, error: res.error } : res);
 
             const [walletRes, productsRes, ordersRes, licensesRes, downloadsRes, subsRes] = await Promise.all([
                 fetchWallet, fetchProducts, fetchOrders, fetchLicenses, fetchDownloads, fetchSubs
@@ -114,7 +141,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 fallbackLabel: string,
                 rawRow: any
             ): { name: string; source: string; reason?: string; resolvedPriceId?: string; resolvedProductKey?: string } => {
-                
+
                 let linkedItem: any = orderItemId ? orderItemsMap.get(orderItemId) : null;
                 if (!linkedItem && orderId) {
                     const itemsForOrder = orderItemsMap.get(`order_${orderId}`);
@@ -140,8 +167,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 }
                 // 3. Order Item Metadata name (useful if snapshot not present but metadata is)
                 else if (linkedItem?.metadata?.product_name) {
-                     name = linkedItem.metadata.product_name;
-                     source = 'order_metadata';
+                    name = linkedItem.metadata.product_name;
+                    source = 'order_metadata';
                 }
                 // 4. Product Display Name
                 else if (linkedProduct?.display_name) {
@@ -221,7 +248,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                     licenseKeyFull: key,
                     licenseKeyMasked: masked,
                     status: l.status === 'active' ? 'Active' : (l.status === 'revoked' ? 'Revoked' : 'Unknown'),
-                    type: l.license_type || l.metadata?.license_type || 'Perpetual', 
+                    type: l.license_type || l.metadata?.license_type || 'Perpetual',
                     issuedOn: l.issued_on ? new Date(l.issued_on).toLocaleDateString() : (l.created_at ? new Date(l.created_at).toLocaleDateString() : 'Unknown date'),
                     assignedTo: l.assigned_to || session.user.email || 'Unknown',
                     entitlements: l.metadata?.entitlements
@@ -231,12 +258,12 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const downloadGroups = new Map<string, any[]>();
             fetchedDownloads.forEach((d: any) => {
                 const catalogEntry = getProductByStripePriceId(d.stripe_price_id);
-                
+
                 const pId = d.product_id || 'unknown';
                 const platform = d.platform || catalogEntry?.platform || 'Unknown';
                 const version = d.version || 'Latest';
                 const fileType = d.file_type || catalogEntry?.fileType || 'Unknown';
-                
+
                 const identityStr = `${pId}::${platform}::${version}::${fileType}`;
                 if (!downloadGroups.has(identityStr)) downloadGroups.set(identityStr, []);
                 downloadGroups.get(identityStr)!.push(d);
@@ -251,9 +278,9 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 const isAvailable = selectedToken.expires_at ? new Date(selectedToken.expires_at) > now : false;
 
                 const identity = resolveIdentity('download', selectedToken.display_name, selectedToken.order_item_id, selectedToken.order_id, selectedToken.product_id, selectedToken.stripe_price_id, 'Cast Director Studio Download', selectedToken);
-                
+
                 const catalogEntry = getProductByStripePriceId(identity.resolvedPriceId) || getProductByKey(identity.resolvedProductKey);
-                
+
                 mappedDownloads.push({
                     id: selectedToken.id || Math.random().toString(),
                     productName: identity.name,
@@ -268,6 +295,17 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             }
 
             setCredits(walletRes.data?.credit_balance ?? null);
+
+            // Fetch account status separately — columns may not exist if migration hasn't run yet
+            try {
+                const { data: statusRes } = await supabase.from('profiles').select('account_status, account_status_reason').eq('id', session.user.id).maybeSingle();
+                if (statusRes) {
+                    setAccountStatus(statusRes.account_status || 'active');
+                    setAccountStatusReason(statusRes.account_status_reason || null);
+                }
+            } catch (e) {
+                // Safe to ignore — columns may not exist yet
+            }
             setOrders(mappedOrders.length > 0 ? mappedOrders : null);
             setLicenses(mappedLicenses.length > 0 ? mappedLicenses : null);
             setDownloads(mappedDownloads.length > 0 ? mappedDownloads : null);
@@ -322,7 +360,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const lacksData = fetchedOrders.length === 0 && fetchedLicenses.length === 0 && fetchedDownloads.length === 0;
             if (lacksData && session.user.email) {
                 const guestCheck = await supabase.from('orders').select('id').eq('customer_email', session.user.email).is('user_id', null).limit(1).maybeSingle();
-                 if (guestCheck.data) setHasGuestPurchases(true);
+                if (guestCheck.data) setHasGuestPurchases(true);
             }
         } catch (err) {
             console.error("Dashboard massive structural failure:", err);
@@ -386,7 +424,17 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 }
             });
 
-            if (error) throw new Error(error.message || 'Checkout failed');
+            if (error) {
+                let parsedMsg = error.message || 'Checkout failed';
+                try {
+                    if (error.context && typeof error.context.json === 'function') {
+                        const body = await error.context.json();
+                        parsedMsg = body.message || body.error || parsedMsg;
+                    }
+                } catch (e) { /* ignore parse error */ }
+                throw new Error(parsedMsg);
+            }
+
             if (data?.url) {
                 window.location.href = data.url;
             } else {
@@ -435,12 +483,22 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             });
 
             if (error) {
-                // Handle duplicate purchase gracefully
-                const parsed = typeof error === 'string' ? { message: error } : error;
-                if (parsed?.context?.code === 'duplicate_purchase' || parsed?.message?.includes('already own')) {
-                    setByokError(parsed?.context?.message || 'You already own this product.');
+                let parsedMsg = error.message || 'Checkout failed';
+                let isDuplicate = false;
+                try {
+                    if (error.context && typeof error.context.json === 'function') {
+                        const body = await error.context.json();
+                        parsedMsg = body.message || body.error || parsedMsg;
+                        if (body.code === 'duplicate_purchase') isDuplicate = true;
+                    } else if (error.message?.includes('already own')) {
+                        isDuplicate = true;
+                    }
+                } catch (e) { /* ignore parse error */ }
+
+                if (isDuplicate) {
+                    setByokError(parsedMsg !== 'Edge Function returned a non-2xx status code' ? parsedMsg : 'You already own this product.');
                 } else {
-                    throw new Error(parsed?.message || 'Checkout failed');
+                    throw new Error(parsedMsg);
                 }
                 return;
             }
@@ -460,23 +518,23 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     // ── Hosted Subscription Checkout ──
     const handleSubscriptionCheckout = async (productKey: string) => {
         setTopUpLoading(productKey);
-        setTopUpError(null);
+        setSubError(null);
 
         try {
             const { data: product } = await supabase.from('products').select('*').eq('product_key', productKey).eq('is_active', true).maybeSingle();
 
             if (!product || !product.stripe_price_id) {
-                setTopUpError('This product is currently unavailable. Please try again later.');
+                setSubError('This product is currently unavailable. Please try again later.');
                 return;
             }
             if (product.stripe_price_id.startsWith('REPLACE_WITH_')) {
-                setTopUpError('This product is not yet configured for checkout.');
+                setSubError('This product is not yet configured for checkout.');
                 return;
             }
 
             const { data: { session: activeSession } } = await supabase.auth.getSession();
             if (!activeSession?.access_token) {
-                setTopUpError('Please sign in to continue.');
+                setSubError('Please sign in to continue.');
                 return;
             }
 
@@ -491,11 +549,22 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             });
 
             if (error) {
-                const parsed = typeof error === 'string' ? { message: error } : error;
-                if (parsed?.context?.code === 'duplicate_purchase' || parsed?.message?.includes('already own')) {
-                    setTopUpError(parsed?.context?.message || 'You already own this product.');
+                let parsedMsg = error.message || 'Checkout failed';
+                let isDuplicate = false;
+                try {
+                    if (error.context && typeof error.context.json === 'function') {
+                        const body = await error.context.json();
+                        parsedMsg = body.message || body.error || parsedMsg;
+                        if (body.code === 'duplicate_purchase') isDuplicate = true;
+                    } else if (error.message?.includes('already own')) {
+                        isDuplicate = true;
+                    }
+                } catch (e) { /* ignore parse error */ }
+
+                if (isDuplicate) {
+                    setSubError(parsedMsg !== 'Edge Function returned a non-2xx status code' ? parsedMsg : 'You already own this product.');
                 } else {
-                    throw new Error(parsed?.message || 'Checkout failed');
+                    throw new Error(parsedMsg);
                 }
                 return;
             }
@@ -505,9 +574,51 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 throw new Error('Checkout session URL was not returned.');
             }
         } catch (err: any) {
-            setTopUpError(err.message || 'An unexpected error occurred during checkout.');
+            setSubError(err.message || 'An unexpected error occurred during checkout.');
         } finally {
             setTopUpLoading(null);
+        }
+    };
+
+    // ── Stripe Billing Portal ──
+    const handleBillingPortal = async () => {
+        setPortalLoading(true);
+        setPortalError(null);
+
+        try {
+            const { data: { session: activeSession } } = await supabase.auth.getSession();
+            if (!activeSession?.access_token) {
+                setPortalError('Please sign in to manage your subscription.');
+                return;
+            }
+
+            const { data, error: invokeErr } = await supabase.functions.invoke('create-billing-portal-session', {
+                body: {}
+            });
+
+            if (invokeErr) {
+                let parsedMsg = invokeErr.message || 'Failed to open billing portal';
+                try {
+                    if (invokeErr.context && typeof invokeErr.context.json === 'function') {
+                        const body = await invokeErr.context.json();
+                        parsedMsg = body.error || parsedMsg;
+                    }
+                } catch (e) { /* ignore parse error */ }
+                throw new Error(parsedMsg);
+            }
+
+            if (data?.error) throw new Error(data.error);
+
+            if (data?.url) {
+                window.location.href = data.url;
+            } else {
+                throw new Error('Billing portal URL was not returned.');
+            }
+        } catch (err: any) {
+            console.error('Billing portal error:', err);
+            setPortalError(err.message || 'An unexpected error occurred.');
+        } finally {
+            setPortalLoading(false);
         }
     };
 
@@ -515,7 +626,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         <section id="account-dashboard" className="py-20 border-t border-nano-border bg-black/20 min-h-[60vh]">
             <div className="container mx-auto px-6">
                 <div className="max-w-5xl mx-auto">
-                    
+
                     {/* Header */}
                     <div className="mb-8">
                         <h2 className="text-3xl md:text-4xl font-bold mb-2">Account Dashboard</h2>
@@ -523,6 +634,40 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             Signed in as {session.user.email}
                         </p>
                     </div>
+
+                    {/* Support Ticket Notification Banner */}
+                    {unreadTicketCount > 0 && (
+                        <button
+                            onClick={() => {
+                                const firstUnread = unreadTickets[0];
+                                if (firstUnread) {
+                                    setAutoOpenTicketId(firstUnread.id);
+                                    // Reset after a tick so re-clicking works
+                                    setTimeout(() => setAutoOpenTicketId(null), 500);
+                                }
+                            }}
+                            className="w-full mb-6 flex items-center gap-3 px-5 py-3.5 rounded-sm border border-nano-yellow/40 bg-nano-yellow/[0.06] hover:bg-nano-yellow/[0.12] transition-all duration-200 group cursor-pointer text-left"
+                        >
+                            <div className="relative flex-shrink-0">
+                                <MessageSquare size={20} className="text-nano-yellow" />
+                                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-nano-yellow text-black text-[9px] font-black rounded-full flex items-center justify-center">
+                                    {unreadTicketCount}
+                                </span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="text-sm font-bold text-white group-hover:text-nano-yellow transition-colors">
+                                    {unreadTicketCount === 1 ? 'You have a new support reply' : `You have ${unreadTicketCount} unread support replies`}
+                                </div>
+                                <div className="text-[11px] text-nano-text/70 truncate mt-0.5">
+                                    {unreadTickets[0]?.subject}
+                                    {unreadTicketCount > 1 && ` and ${unreadTicketCount - 1} more`}
+                                </div>
+                            </div>
+                            <span className="text-[10px] text-nano-yellow/70 uppercase tracking-widest font-bold flex-shrink-0 group-hover:text-nano-yellow transition-colors">
+                                View →
+                            </span>
+                        </button>
+                    )}
 
                     {loading ? (
                         <div className="rounded-sm border border-nano-border bg-nano-panel/40 p-12 text-center text-nano-text animate-pulse">
@@ -534,6 +679,35 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                         </div>
                     ) : (
                         <>
+                            {/* Account Status Banner */}
+                            {accountStatus === 'paused' && (
+                                <div className="rounded-sm border border-amber-500/50 bg-amber-500/10 p-6 mb-8">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className="w-3 h-3 bg-amber-400 rounded-full animate-pulse" />
+                                        <h3 className="text-amber-400 font-bold text-lg">Account Paused</h3>
+                                    </div>
+                                    <p className="text-amber-200 text-sm">
+                                        Your account is currently paused.{accountStatusReason ? ` Reason: ${accountStatusReason}.` : ''} Please contact support for assistance.
+                                    </p>
+                                    <a href="#support-tickets" className="inline-block mt-3 text-xs uppercase tracking-wider font-bold text-amber-400 hover:text-amber-300 transition-colors">
+                                        Contact Support →
+                                    </a>
+                                </div>
+                            )}
+                            {accountStatus === 'canceled' && (
+                                <div className="rounded-sm border border-red-500/50 bg-red-500/10 p-6 mb-8">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className="w-3 h-3 bg-red-400 rounded-full" />
+                                        <h3 className="text-red-400 font-bold text-lg">Account Canceled</h3>
+                                    </div>
+                                    <p className="text-red-200 text-sm">
+                                        Your account has been canceled.{accountStatusReason ? ` Reason: ${accountStatusReason}.` : ''} Please contact support if you believe this is an error.
+                                    </p>
+                                    <a href="#support-tickets" className="inline-block mt-3 text-xs uppercase tracking-wider font-bold text-red-400 hover:text-red-300 transition-colors">
+                                        Contact Support →
+                                    </a>
+                                </div>
+                            )}
                             {/* Dashboard Level Recovery Action */}
                             {hasGuestPurchases && (
                                 <div className="mb-8 rounded-sm border border-nano-yellow/50 bg-nano-yellow/10 p-6 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -543,7 +717,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                             We found guest purchases associated with <strong>{session.user.email}</strong> that aren't linked to your account yet.
                                         </p>
                                     </div>
-                                    <button 
+                                    <button
                                         onClick={() => setShowClaimModal(true)}
                                         className="shrink-0 px-6 py-3 bg-nano-yellow text-black font-bold uppercase tracking-wide hover:bg-nano-gold transition-colors flex flex-col items-center"
                                     >
@@ -553,8 +727,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             )}
 
                             {showClaimModal && (
-                                <ClaimPurchasesModal 
-                                    session={session} 
+                                <ClaimPurchasesModal
+                                    session={session}
                                     onClose={() => setShowClaimModal(false)}
                                     onSuccess={() => {
                                         setShowClaimModal(false);
@@ -597,6 +771,37 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 </div>
                             </div>
 
+                            {/* Dual Ownership Banner — show when user has both Hosted + BYOK */}
+                            {(subStatus?.hasStarter || subStatus?.hasPro) && (byokStatus?.hasIndie || byokStatus?.hasAgency) && (
+                                <div className="mb-12 rounded-sm border border-nano-yellow/30 bg-nano-yellow/5 p-6">
+                                    <div className="flex items-start gap-4">
+                                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-nano-yellow/20 flex items-center justify-center mt-0.5">
+                                            <span className="text-nano-yellow text-lg">⚡</span>
+                                        </div>
+                                        <div className="flex-1">
+                                            <h3 className="text-white font-bold mb-1">Managed API + BYOK Desktop Active</h3>
+                                            <p className="text-sm text-nano-text leading-relaxed">
+                                                You have both Managed API credits and a BYOK Desktop license. BYOK may save money for high-volume generation, but your Hosted credits remain available.
+                                            </p>
+                                            <div className="flex flex-wrap gap-3 mt-4">
+                                                <a
+                                                    href="#hosted-subscriptions"
+                                                    className="px-4 py-2 bg-white/10 text-white font-bold text-xs uppercase tracking-wide hover:bg-white/20 transition-all rounded-sm"
+                                                >
+                                                    Manage Hosted Subscription
+                                                </a>
+                                                <a
+                                                    href="#byok-license"
+                                                    className="px-4 py-2 bg-nano-yellow/20 text-nano-yellow font-bold text-xs uppercase tracking-wide hover:bg-nano-yellow/30 transition-all rounded-sm"
+                                                >
+                                                    View BYOK License
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Credit Top-Up Section — only for users with credits or active subscriptions */}
                             {(credits !== null || (subscriptions && subscriptions.some(s => s.status === 'active'))) && (
                                 <div className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
@@ -632,9 +837,14 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
                             {/* Hosted Subscriptions Section */}
                             {subStatus && (
-                                <div className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                <div id="hosted-subscriptions" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                     <h3 className="text-lg font-bold mb-4">Hosted Subscriptions</h3>
-                                    
+                                    {subError && (
+                                        <div className="mb-4 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
+                                            {subError}
+                                        </div>
+                                    )}
+
                                     {subStatus.hasPro ? (
                                         <>
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -653,6 +863,21 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     </div>
                                                 </div>
                                             </div>
+                                            <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-nano-border/30">
+                                                <button
+                                                    onClick={handleBillingPortal}
+                                                    disabled={portalLoading}
+                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-white/20 transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {portalLoading && <Loader2 size={14} className="animate-spin" />}
+                                                    Manage Subscription
+                                                </button>
+                                            </div>
+                                            {portalError && (
+                                                <div className="mt-3 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
+                                                    {portalError}
+                                                </div>
+                                            )}
                                         </>
                                     ) : subStatus.hasStarter ? (
                                         <>
@@ -674,6 +899,14 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                             </div>
                                             <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-nano-border/30">
                                                 <button
+                                                    onClick={handleBillingPortal}
+                                                    disabled={portalLoading}
+                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-white/20 transition-all disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {portalLoading && <Loader2 size={14} className="animate-spin" />}
+                                                    Manage Subscription
+                                                </button>
+                                                <button
                                                     onClick={() => handleSubscriptionCheckout('pro')}
                                                     disabled={!!topUpLoading}
                                                     className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
@@ -682,6 +915,11 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     Upgrade to Pro — $99/month
                                                 </button>
                                             </div>
+                                            {portalError && (
+                                                <div className="mt-3 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
+                                                    {portalError}
+                                                </div>
+                                            )}
                                         </>
                                     ) : (
                                         <>
@@ -713,7 +951,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
                             {/* BYOK Desktop License Section */}
                             {byokStatus && (
-                                <div className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                <div id="byok-license" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                     {byokStatus.hasAgency ? (
                                         <>
                                             <h3 className="text-lg font-bold mb-4">Desktop License — Agency Commercial BYOK</h3>
@@ -793,26 +1031,64 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     ) : (
                                         <>
                                             <h3 className="text-lg font-bold mb-2">Upgrade to BYOK Desktop</h3>
-                                            <p className="text-sm text-nano-text mb-4">
-                                                Generate often? BYOK Desktop may save money by letting you connect your own Google/Vertex API key and pay the AI provider directly instead of relying only on monthly Cast Director Studio credits.
+                                            <p className="text-sm text-nano-text mb-6">
+                                                Generate often? BYOK Desktop is the lower-cost path for high-volume creators who want to use their own Google/Vertex API key and pay the AI provider directly.
                                             </p>
-                                            <div className="flex flex-wrap gap-4">
-                                                <button
-                                                    onClick={() => handleByokCheckout('indie_desktop_byok')}
-                                                    disabled={!!topUpLoading}
-                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
-                                                >
-                                                    {topUpLoading === 'indie_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
-                                                    Indie Desktop BYOK — $199
-                                                </button>
-                                                <button
-                                                    onClick={() => handleByokCheckout('agency_desktop_byok')}
-                                                    disabled={!!topUpLoading}
-                                                    className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
-                                                >
-                                                    {topUpLoading === 'agency_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
-                                                    Agency Commercial BYOK — $499
-                                                </button>
+                                            <div className="grid md:grid-cols-2 gap-4">
+                                                {/* Indie BYOK Card */}
+                                                <div className="border border-nano-border/50 rounded-sm bg-black/20 p-5 flex flex-col">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <h4 className="text-white font-bold text-sm uppercase tracking-wide">Indie Desktop BYOK</h4>
+                                                        <span className="text-nano-yellow font-bold text-sm">$199</span>
+                                                    </div>
+                                                    <details className="group mb-4">
+                                                        <summary className="flex items-center gap-1.5 text-xs text-nano-text cursor-pointer hover:text-white focus:text-white transition-colors select-none list-none [&::-webkit-details-marker]:hidden" tabIndex={0} aria-label="View Indie BYOK plan details">
+                                                            <Info size={13} className="flex-shrink-0 opacity-60 group-open:opacity-100 transition-opacity" />
+                                                            <span className="group-open:hidden">View plan details</span>
+                                                            <span className="hidden group-open:inline">Hide plan details</span>
+                                                        </summary>
+                                                        <p className="mt-2 text-xs text-nano-text/80 leading-relaxed" role="note">
+                                                            Pay once for the desktop app license. No monthly Cast Director Studio credit subscription is required. Connect your own Google/Vertex API key and pay the AI provider directly for generation usage. Includes 12 months of updates and standard support. Best for solo creators, freelancers, and small creators using the app on one local device.
+                                                        </p>
+                                                    </details>
+                                                    <div className="mt-auto">
+                                                        <button
+                                                            onClick={() => handleByokCheckout('indie_desktop_byok')}
+                                                            disabled={!!topUpLoading}
+                                                            className="w-full px-5 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                                        >
+                                                            {topUpLoading === 'indie_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
+                                                            Buy Indie — $199
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {/* Agency BYOK Card */}
+                                                <div className="border border-nano-border/50 rounded-sm bg-black/20 p-5 flex flex-col">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <h4 className="text-white font-bold text-sm uppercase tracking-wide">Agency Commercial BYOK</h4>
+                                                        <span className="text-nano-yellow font-bold text-sm">$499</span>
+                                                    </div>
+                                                    <details className="group mb-4">
+                                                        <summary className="flex items-center gap-1.5 text-xs text-nano-text cursor-pointer hover:text-white focus:text-white transition-colors select-none list-none [&::-webkit-details-marker]:hidden" tabIndex={0} aria-label="View Agency BYOK plan details">
+                                                            <Info size={13} className="flex-shrink-0 opacity-60 group-open:opacity-100 transition-opacity" />
+                                                            <span className="group-open:hidden">View plan details</span>
+                                                            <span className="hidden group-open:inline">Hide plan details</span>
+                                                        </summary>
+                                                        <p className="mt-2 text-xs text-nano-text/80 leading-relaxed" role="note">
+                                                            Pay once for the Agency desktop license. No monthly Cast Director Studio credit subscription is required. Connect your own Google/Vertex API key and pay the AI provider directly for generation usage. Includes 12 months of updates and priority support. Built for agencies, studios, teams, client-facing workflows, and up to 3 local device activations.
+                                                        </p>
+                                                    </details>
+                                                    <div className="mt-auto">
+                                                        <button
+                                                            onClick={() => handleByokCheckout('agency_desktop_byok')}
+                                                            disabled={!!topUpLoading}
+                                                            className="w-full px-5 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                                        >
+                                                            {topUpLoading === 'agency_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
+                                                            Buy Agency — $499
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </>
                                     )}
@@ -827,7 +1103,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             <div className="grid lg:grid-cols-2 gap-8">
                                 {/* Left Column: Purchases & Subs */}
                                 <div className="space-y-8">
-                                    
+
                                     {/* Purchases List */}
                                     <div className="rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                         <h3 className="text-xl font-bold mb-6">Order History</h3>
@@ -887,7 +1163,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
                                 {/* Right Column: Digital Access (Licenses & Downloads) */}
                                 <div className="space-y-8">
-                                    
+
                                     {/* Licenses List */}
                                     <div className="rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                         <h3 className="text-xl font-bold mb-6">Software Licenses</h3>
@@ -903,18 +1179,18 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                             <strong className="text-white block truncate max-w-[200px]" title={lic.licenseName}>
                                                                 {lic.licenseName}
                                                             </strong>
-                                                            {lic.status.toLowerCase() === 'active' ? 
-                                                                <span className="text-[10px] bg-green-900/40 text-green-400 px-2 py-0.5 rounded-sm uppercase tracking-wide border border-green-500/30">Active</span> 
-                                                                : 
+                                                            {lic.status.toLowerCase() === 'active' ?
+                                                                <span className="text-[10px] bg-green-900/40 text-green-400 px-2 py-0.5 rounded-sm uppercase tracking-wide border border-green-500/30">Active</span>
+                                                                :
                                                                 <span className="text-[10px] bg-red-900/40 text-red-400 px-2 py-0.5 rounded-sm uppercase tracking-wide border border-red-500/30">{lic.status}</span>
                                                             }
                                                         </div>
-                                                        
+
                                                         <div className="grid grid-cols-2 gap-2 text-xs text-nano-text mb-3">
                                                             <div>Type: <span className="text-white">{lic.type}</span></div>
                                                             <div>Assigned To: <span className="text-white truncate" title={lic.assignedTo}>{lic.assignedTo}</span></div>
                                                         </div>
-                                                        
+
                                                         <div className="font-mono text-xs text-nano-yellow bg-black p-2 rounded-sm mb-1 break-all select-all group relative cursor-pointer" title="Click to reveal">
                                                             <span className="group-hover:hidden">{lic.licenseKeyMasked}</span>
                                                             <span className="hidden group-hover:inline">{lic.licenseKeyFull}</span>
@@ -922,7 +1198,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                         <div className="text-[10px] text-nano-text/60 flex justify-between">
                                                             <span>Issued On: {lic.issuedOn}</span>
                                                         </div>
-                                                        
+
                                                         {lic.entitlements && lic.entitlements.length > 0 && (
                                                             <div className="mt-3 pt-3 border-t border-nano-border/30 text-[10px] text-nano-text/80">
                                                                 Includes: {lic.entitlements.join(', ')}
@@ -953,23 +1229,23 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                             <div>Version: <span className="text-white">{dl.version}</span></div>
                                                             <div>File Type: <span className="text-white">{dl.fileType}</span></div>
                                                         </div>
-                                                        
+
                                                         {dl.expiresAt && (
                                                             <div className="text-xs text-nano-text mb-4">
                                                                 Download link valid until {dl.expiresAt}
                                                             </div>
                                                         )}
-                                                        
+
                                                         <div className="flex flex-col sm:flex-row gap-3 mt-4">
                                                             {dl.isAvailable && dl.downloadUrl ? (
-                                                                <a 
+                                                                <a
                                                                     href={dl.downloadUrl}
                                                                     className="px-4 py-2 bg-nano-yellow text-black font-bold text-xs uppercase tracking-wide text-center hover:bg-nano-gold transition-colors block"
                                                                 >
                                                                     Download Installer
                                                                 </a>
                                                             ) : (
-                                                                <button 
+                                                                <button
                                                                     disabled
                                                                     className="px-4 py-2 bg-gray-600 text-gray-400 font-bold text-xs uppercase tracking-wide text-center cursor-not-allowed border border-gray-600"
                                                                 >
@@ -991,8 +1267,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             </div>
 
                             {/* Support Tickets — Full Width */}
-                            <div className="mt-8">
-                                <SupportTickets session={session} />
+                            <div id="support-tickets" className="mt-8">
+                                <SupportTickets session={session} onUnreadCount={handleUnreadCount} autoOpenTicketId={autoOpenTicketId} />
                             </div>
                         </>
                     )}

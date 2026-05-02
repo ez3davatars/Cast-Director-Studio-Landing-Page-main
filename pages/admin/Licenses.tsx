@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase, invokeAuthenticatedFunction } from '../../lib/supabase';
 import AdminSearchFilter from '../../components/AdminSearchFilter';
 import { useNavigate } from 'react-router-dom';
 import { ExternalLink, Mail, Loader2 } from 'lucide-react';
@@ -85,8 +85,10 @@ const LicensesAdmin: React.FC = () => {
     setResendingState(prev => ({...prev, [orderId]: true}));
     
     try {
-      const { data, error: invokeErr } = await supabase.functions.invoke('resend-transactional-email', {
-        body: { action: 'license_download_details', contact_id: contactId, entity_id: orderId }
+      const { data, error: invokeErr } = await invokeAuthenticatedFunction('resend-transactional-email', {
+        action: 'license_header', // Original action was 'license_download_details', fixing to match expected
+        contact_id: contactId,
+        entity_id: orderId
       });
       if (invokeErr) throw new Error(invokeErr.message);
       if (data?.error) throw new Error(data.error);

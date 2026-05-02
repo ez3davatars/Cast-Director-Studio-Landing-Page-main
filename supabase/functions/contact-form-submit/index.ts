@@ -18,6 +18,15 @@ const ALLOWED_INQUIRY_TYPES = [
   'General Question',
 ];
 
+const CATEGORY_MAP: Record<string, string> = {
+  'Product Support': 'general_support',
+  'Sales / Licensing': 'license_activation',
+  'Hosted Credits or Billing': 'hosted_credits',
+  'BYOK License Questions': 'byok_setup',
+  'Partnerships / Media': 'general_support',
+  'General Question': 'general_support',
+};
+
 function jsonResponse(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
@@ -206,6 +215,8 @@ serve(async (req: any) => {
 
     // ── Create conversation ──
     const ticketId = generateTicketId();
+    const category = CATEGORY_MAP[inquiryType] || 'general_support';
+    const nowIso = new Date().toISOString();
     const { data: convo, error: convoErr } = await sb
       .from('crm_conversations')
       .insert({
@@ -214,8 +225,11 @@ serve(async (req: any) => {
         ticket_id: ticketId,
         subject: `${inquiryType} — Contact Form`,
         inquiry_type: inquiryType,
+        category: category,
         status: 'new',
+        priority: 'normal',
         source: 'website_contact_form',
+        last_customer_message_at: nowIso,
       })
       .select('id')
       .single();
@@ -264,14 +278,16 @@ serve(async (req: any) => {
       adminEmailOk = false;
     }
 
-    // Visitor confirmation (FAIL-SOFT — never fails the submission)
+    // Visitor confirmation (FAIL-SOFT — no message body, dashboard-first for logged-in users)
     try {
+      const confirmSubject = `[${ticketId}] Cast Director Studio Support Ticket Opened`;
+      const confirmBody = `Hello,\n\nWe received your Cast Director Studio support request.\n\nTicket: ${ticketId}\n\nA support reply will be sent through Cast Director Studio support.\n\nIf you have a Cast Director Studio account, please log into your dashboard to view support activity:\nhttps://castdirectorstudio.com/account\n\nCast Director Studio Support\nsupport@castdirectorstudio.com`;
+
       await resendSend(resendApiKey, {
         from: fromAddr,
         to: [email],
-        reply_to: 'support@inbox.castdirectorstudio.com',
-        subject: `We received your inquiry #${ticketId}`,
-        html: buildConfirmHtml(ticketId, name, inquiryType, message, when),
+        subject: confirmSubject,
+        text: confirmBody,
       });
     } catch (e: any) {
       console.error('Confirmation email failed (fail-soft):', e.message);

@@ -96,6 +96,19 @@ serve(async (req: Request) => {
     // AUTHENTICATED CHECKOUT PATH
     // ──────────────────────────────────────────────────
     if (!isGuestCheckout && user) {
+      // 4a. Account Status Guard (block paused/canceled accounts)
+      const { data: profileCheck } = await supabaseAdmin.from('profiles').select('account_status').eq('id', user.id).maybeSingle();
+      if (profileCheck && profileCheck.account_status !== 'active') {
+        return new Response(JSON.stringify({
+          error: "Your account is not currently eligible for checkout. Please contact support.",
+          code: "account_blocked",
+          message: "Your account is not currently eligible for checkout. Please contact support.",
+        }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       // 4b. Backend Duplicate Guard (authenticated only)
       if (product) {
         const { data: activeLicenses } = await supabaseAdmin.from('licenses')

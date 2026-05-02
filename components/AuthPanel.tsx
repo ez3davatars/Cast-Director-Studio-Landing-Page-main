@@ -13,7 +13,7 @@ const AuthPanel: React.FC<AuthPanelProps> = ({
     session,
     onClose,
 }) => {
-    const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
+    const [mode, setMode] = useState<'signin' | 'signup' | 'forgot_password'>(initialMode);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [message, setMessage] = useState<string | null>(null);
@@ -39,7 +39,7 @@ const AuthPanel: React.FC<AuthPanelProps> = ({
                 if (error) throw error;
 
                 setMessage('Account created. Check your email if confirmation is enabled.');
-            } else {
+            } else if (mode === 'signin') {
                 const { error } = await supabase.auth.signInWithPassword({
                     email,
                     password,
@@ -49,6 +49,14 @@ const AuthPanel: React.FC<AuthPanelProps> = ({
 
                 setMessage('Signed in successfully.');
                 onClose?.();
+            } else if (mode === 'forgot_password') {
+                const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: `${window.location.origin}/reset-password`,
+                });
+
+                if (error) throw error;
+
+                setMessage('If an account exists for that email, a password reset link has been sent.');
             }
         } catch (err) {
             setMessage(err instanceof Error ? err.message : 'Authentication failed.');
@@ -92,7 +100,7 @@ const AuthPanel: React.FC<AuthPanelProps> = ({
     return (
         <div className="rounded-sm border border-nano-border bg-nano-panel p-6 shadow-2xl">
             <h3 className="text-2xl font-bold mb-2">
-                {mode === 'signup' ? 'Create Account' : 'Sign In'}
+                {mode === 'signup' ? 'Create Account' : mode === 'signin' ? 'Sign In' : 'Reset Password'}
             </h3>
 
             <p className="text-sm text-nano-text mb-5">
@@ -110,7 +118,7 @@ const AuthPanel: React.FC<AuthPanelProps> = ({
                             Sign In
                         </button>
                     </>
-                ) : (
+                ) : mode === 'signin' ? (
                     <>
                         Need an account?{' '}
                         <button
@@ -122,6 +130,20 @@ const AuthPanel: React.FC<AuthPanelProps> = ({
                             className="text-nano-yellow hover:underline"
                         >
                             Create Account
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        Remember your password?{' '}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setMode('signin');
+                                setMessage(null);
+                            }}
+                            className="text-nano-yellow hover:underline"
+                        >
+                            Back to Sign In
                         </button>
                     </>
                 )}
@@ -137,21 +159,39 @@ const AuthPanel: React.FC<AuthPanelProps> = ({
                     required
                 />
 
-                <input
-                    type="password"
-                    placeholder="Password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3 bg-black/30 border border-nano-border text-white outline-none"
-                    required
-                />
+                {mode !== 'forgot_password' && (
+                    <div className="space-y-2">
+                        <input
+                            type="password"
+                            placeholder="Password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full px-4 py-3 bg-black/30 border border-nano-border text-white outline-none"
+                            required
+                        />
+                        {mode === 'signin' && (
+                            <div className="flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setMode('forgot_password');
+                                        setMessage(null);
+                                    }}
+                                    className="text-xs text-nano-text hover:text-white transition-colors"
+                                >
+                                    Forgot Password?
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <button
                     type="submit"
                     disabled={loading}
                     className="w-full py-3 bg-nano-yellow text-black font-bold uppercase tracking-wide hover:bg-nano-gold transition-colors disabled:opacity-70"
                 >
-                    {loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Sign In'}
+                    {loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : mode === 'signin' ? 'Sign In' : 'Send Reset Link'}
                 </button>
             </form>
 

@@ -39,6 +39,7 @@ import FaceReference from './pages/FaceReference';
 import About from './pages/About';
 import Careers from './pages/Careers';
 import Contact from './pages/Contact';
+import ResetPassword from './pages/ResetPassword';
 import { supabase } from './lib/supabase';
 
 // ---------- Auth Context ----------
@@ -95,9 +96,12 @@ function App() {
   const closeAuthModal = () => setAuthModalMode(null);
 
   if (isLoadingSession) {
+      const isBillingReturn = new URLSearchParams(window.location.search).get('billing') === 'return';
       return (
           <div className="min-h-screen bg-nano-dark text-white flex items-center justify-center">
-              <div className="text-nano-text animate-pulse">Initializing Session...</div>
+              <div className="text-nano-text animate-pulse">
+                  {isBillingReturn ? 'Refreshing your billing details...' : 'Initializing Session...'}
+              </div>
           </div>
       );
   }
@@ -140,6 +144,7 @@ function App() {
           
           <Route path="/success/:type" element={<Success />} />
           <Route path="/get-started" element={<GetStarted />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           
           {/* Secure Cloudflare R2 Delivery Handoff Route */}
           <Route path="/download/:id" element={<DownloadHandler />} />
