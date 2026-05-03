@@ -21,8 +21,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ initialMode, session, onClose }) 
       if (from) {
         navigate(from, { replace: true });
       } else {
-        // Otherwise just close the modal so they stay on the landing page
+        // Navigate directly to the account dashboard after sign-in
         onClose();
+        navigate('/account', { replace: true });
       }
     }
   }, [session, navigate, location, onClose]);

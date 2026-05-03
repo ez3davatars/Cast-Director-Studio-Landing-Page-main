@@ -75,9 +75,10 @@ interface SupportTicketsProps {
   session: Session;
   onUnreadCount?: (count: number, unreadTickets: { id: string; subject: string }[]) => void;
   autoOpenTicketId?: string | null;
+  triggerNewTicket?: boolean;
 }
 
-const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount, autoOpenTicketId }) => {
+const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount, autoOpenTicketId, triggerNewTicket }) => {
   const [tickets, setTickets] = useState<CrmConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -442,6 +443,13 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
       }, 100);
     }
   }, [autoOpenTicketId, tickets]);
+
+  // Open new ticket modal when triggered from parent (e.g. header button)
+  useEffect(() => {
+    if (triggerNewTicket) {
+      setShowNewTicket(true);
+    }
+  }, [triggerNewTicket]);
 
   // ── Render ──
   return (

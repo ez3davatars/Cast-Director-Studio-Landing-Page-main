@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import SupportTickets from './SupportTickets';
 import ClaimPurchasesModal from './ClaimPurchasesModal';
 import { Session } from '@supabase/supabase-js';
 import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
-import { Loader2, Info, MessageSquare } from 'lucide-react';
+import { Loader2, Info, MessageSquare, LifeBuoy } from 'lucide-react';
 
 interface AccountDashboardProps {
     session: Session;
@@ -45,6 +45,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     const [unreadTicketCount, setUnreadTicketCount] = useState(0);
     const [unreadTickets, setUnreadTickets] = useState<{ id: string; subject: string }[]>([]);
     const [autoOpenTicketId, setAutoOpenTicketId] = useState<string | null>(null);
+    const [triggerNewTicket, setTriggerNewTicket] = useState(false);
+    const supportSectionRef = useRef<HTMLDivElement>(null);
 
     const handleUnreadCount = useCallback((count: number, tickets: { id: string; subject: string }[]) => {
         setUnreadTicketCount(count);
@@ -628,11 +630,34 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 <div className="max-w-5xl mx-auto">
 
                     {/* Header */}
-                    <div className="mb-8">
-                        <h2 className="text-3xl md:text-4xl font-bold mb-2">Account Dashboard</h2>
-                        <p className="text-nano-text">
-                            Signed in as {session.user.email}
-                        </p>
+                    <div className="mb-8 flex items-start justify-between">
+                        <div>
+                            <h2 className="text-3xl md:text-4xl font-bold mb-2">Account Dashboard</h2>
+                            <p className="text-nano-text">
+                                Signed in as {session.user.email}
+                            </p>
+                        </div>
+                        {unreadTicketCount === 0 && (
+                            <button
+                                onClick={() => {
+                                    // Scroll to the support section first
+                                    const el = supportSectionRef.current;
+                                    if (el) {
+                                        const rect = el.getBoundingClientRect();
+                                        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                                        const navbarHeight = 100;
+                                        window.scrollTo({ top: rect.top + scrollTop - navbarHeight, behavior: 'smooth' });
+                                    }
+                                    // Trigger the new ticket modal in SupportTickets
+                                    setTriggerNewTicket(true);
+                                    setTimeout(() => setTriggerNewTicket(false), 500);
+                                }}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-nano-yellow text-black text-xs font-bold uppercase tracking-wide hover:bg-nano-gold transition-all duration-200 rounded-sm flex-shrink-0 mt-1"
+                            >
+                                <LifeBuoy size={15} />
+                                Open a Support Ticket
+                            </button>
+                        )}
                     </div>
 
                     {/* Support Ticket Notification Banner */}
@@ -1267,8 +1292,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             </div>
 
                             {/* Support Tickets — Full Width */}
-                            <div id="support-tickets" className="mt-8">
-                                <SupportTickets session={session} onUnreadCount={handleUnreadCount} autoOpenTicketId={autoOpenTicketId} />
+                            <div id="support-tickets" className="mt-8" ref={supportSectionRef}>
+                                <SupportTickets session={session} onUnreadCount={handleUnreadCount} autoOpenTicketId={autoOpenTicketId} triggerNewTicket={triggerNewTicket} />
                             </div>
                         </>
                     )}
