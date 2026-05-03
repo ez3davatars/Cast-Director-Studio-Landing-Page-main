@@ -117,6 +117,18 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
   const shouldAutoScrollRef = useRef(true);
   const prevTicketIdRef = useRef<string | undefined>(undefined);
 
+  /** Canonical message dedupe + sort. Ensures each message appears once by database id. */
+  const dedupeAndSortMessages = (messages: CrmMessage[]): CrmMessage[] => {
+    const seen = new Set<string>();
+    const result: CrmMessage[] = [];
+    for (const msg of messages) {
+      if (seen.has(msg.id)) continue;
+      seen.add(msg.id);
+      result.push(msg);
+    }
+    return result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  };
+
   const scrollToLatestMessage = (behavior: ScrollBehavior = 'smooth') => {
     requestAnimationFrame(() => {
       const container = messagesContainerRef.current;
@@ -190,7 +202,7 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
         { event: 'INSERT', schema: 'public', table: 'crm_messages' },
         (payload) => {
           const newMsg = payload.new as any;
-          
+
           // Client-side filter: Ensure it belongs to one of our tickets
           // (RLS enforces this, but this is a secondary safety net)
           const belongsToUs = ticketsRef.current.some(t => t.id === newMsg.conversation_id);
@@ -198,21 +210,15 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
 
           setTickets(prev => prev.map(t => {
             if (t.id === newMsg.conversation_id) {
-              if (t.messages.some(m => m.id === newMsg.id)) return t;
-              const updatedMessages = [...t.messages, newMsg].sort(
-                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-              );
-              return { ...t, messages: updatedMessages };
+              return { ...t, messages: dedupeAndSortMessages([...t.messages, newMsg]) };
             }
             return t;
           }));
 
           setSelectedTicket(prev => {
             if (prev && prev.id === newMsg.conversation_id) {
-              if (prev.messages.some(m => m.id === newMsg.id)) return prev;
-              const updatedMessages = [...prev.messages, newMsg].sort(
-                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-              );
+              const deduped = dedupeAndSortMessages([...prev.messages, newMsg]);
+              if (deduped.length === prev.messages.length) return prev;
 
               // Auto-scroll logic based on position
               const container = messagesContainerRef.current;
@@ -225,7 +231,7 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
                 setTimeout(() => setShowNewMessageToast(true), 0);
               }
 
-              return { ...prev, messages: updatedMessages };
+              return { ...prev, messages: deduped };
             }
             return prev;
           });
@@ -323,8 +329,20 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
       } else {
         setSubmitError(data.error || 'Failed to create ticket. Please try again.');
       }
-    } catch {
-      setSubmitError('Could not reach the server. Please check your connection.');
+    } catch (err: any) {
+      console.error('Dashboard ticket submit error:', err);
+
+      // Map error types to user-friendly messages
+      const message = err?.message || '';
+      if (message.includes('session') || message.includes('expired') || message.includes('sign')) {
+        setSubmitError(message);
+      } else if (message.includes('permission') || message.includes('Forbidden')) {
+        setSubmitError('You do not have permission to create this ticket.');
+      } else if (err instanceof TypeError && message === 'Failed to fetch') {
+        setSubmitError('Could not reach the server. Please check your connection.');
+      } else {
+        setSubmitError(message || 'Failed to create ticket. Please try again.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -348,6 +366,12 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
     setReplyError(null);
 
     try {
+      // Dev-mode diagnostic: confirm session exists before sending
+      if (import.meta.env.DEV) {
+        const { data: debugSession } = await supabase.auth.getSession();
+        console.debug('[CRM Reply] Sending customer reply with session:', Boolean(debugSession.session?.access_token));
+      }
+
       const { data, error: funcErr } = await invokeAuthenticatedFunction('customer-crm-reply', {
         conversation_id: selectedTicket.id,
         reply_text: replyText.trim(),
@@ -362,14 +386,14 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
       setSelectedTicket(prev => {
         if (!prev) return prev;
         const updatedStatus = data?.newStatus || prev.status;
-        return { ...prev, status: updatedStatus, messages: [...prev.messages, newMsg] };
+        return { ...prev, status: updatedStatus, messages: dedupeAndSortMessages([...prev.messages, newMsg]) };
       });
 
       // Update the tickets list
       setTickets(prev => prev.map(t => {
         if (t.id === selectedTicket.id) {
           const updatedStatus = data?.newStatus || t.status;
-          return { ...t, status: updatedStatus, messages: [...t.messages, newMsg] };
+          return { ...t, status: updatedStatus, messages: dedupeAndSortMessages([...t.messages, newMsg]) };
         }
         return t;
       }));
@@ -389,10 +413,8 @@ const SupportTickets: React.FC<SupportTicketsProps> = ({ session, onUnreadCount,
     }
   };
 
-  // ── Sorted messages for selected ticket ──
-  const sortedMessages = selectedTicket?.messages
-    ?.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-    || [];
+  // ── Sorted + deduped messages for selected ticket ──
+  const sortedMessages = selectedTicket?.messages ? dedupeAndSortMessages(selectedTicket.messages) : [];
 
   const latestMessagePreview = (ticket: CrmConversation): string => {
     if (!ticket.messages || ticket.messages.length === 0) return 'No messages';

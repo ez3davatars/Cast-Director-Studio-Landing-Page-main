@@ -5,6 +5,17 @@ import AdminSearchFilter from '../../components/AdminSearchFilter';
 import { useNavigate } from 'react-router-dom';
 import { useCrmTicketPresence } from '../../hooks/useCrmTicketPresence';
 
+type CrmAdminMessage = {
+  id: string;
+  body: string | null;
+  sender_name: string | null;
+  sender_email: string | null;
+  direction: string;
+  source: string | null;
+  created_at: string;
+  raw_payload: Record<string, unknown>;
+};
+
 type Conversation = {
   id: string;
   ticket_id: string;
@@ -23,16 +34,7 @@ type Conversation = {
     company: string | null;
     user_id: string | null;
   } | null;
-  messages: {
-    id: string;
-    body: string | null;
-    sender_name: string | null;
-    sender_email: string | null;
-    direction: string;
-    source: string | null;
-    created_at: string;
-    raw_payload: Record<string, unknown>;
-  }[];
+  messages: CrmAdminMessage[];
 };
 
 type InternalNote = {
@@ -142,6 +144,23 @@ const LeadsAdmin: React.FC = () => {
   const shouldAutoScrollRef = useRef(true);
   const prevConvoIdRef = useRef<string | undefined>(undefined);
 
+  /**
+   * Canonical message dedupe + sort helper.
+   * Ensures each message appears exactly once (by database id),
+   * sorted chronologically. Applied at every state mutation point
+   * so duplicates never accumulate regardless of event ordering.
+   */
+  const dedupeAndSortMessages = (messages: CrmAdminMessage[]): CrmAdminMessage[] => {
+    const seen = new Set<string>();
+    const result: CrmAdminMessage[] = [];
+    for (const msg of messages) {
+      if (seen.has(msg.id)) continue;
+      seen.add(msg.id);
+      result.push(msg);
+    }
+    return result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  };
+
   const scrollToLatestMessage = (behavior: ScrollBehavior = 'smooth') => {
     requestAnimationFrame(() => {
       const container = adminMessagesContainerRef.current;
@@ -211,21 +230,16 @@ const LeadsAdmin: React.FC = () => {
           
           setConversations(prev => prev.map(c => {
             if (c.id === newMsg.conversation_id) {
-              if (c.messages.some(m => m.id === newMsg.id)) return c;
-              const updatedMessages = [...c.messages, newMsg].sort(
-                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-              );
-              return { ...c, messages: updatedMessages };
+              return { ...c, messages: dedupeAndSortMessages([...c.messages, newMsg]) };
             }
             return c;
           }));
 
           setSelected(prev => {
             if (prev && prev.id === newMsg.conversation_id) {
-              if (prev.messages.some(m => m.id === newMsg.id)) return prev;
-              const updatedMessages = [...prev.messages, newMsg].sort(
-                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-              );
+              const deduped = dedupeAndSortMessages([...prev.messages, newMsg]);
+              // Only update if the message is actually new (dedupe didn't remove it)
+              if (deduped.length === prev.messages.length) return prev;
 
               // Auto-scroll logic based on position
               const container = adminMessagesContainerRef.current;
@@ -238,7 +252,7 @@ const LeadsAdmin: React.FC = () => {
                 setTimeout(() => setShowNewMessageToast(true), 0);
               }
 
-              return { ...prev, messages: updatedMessages };
+              return { ...prev, messages: deduped };
             }
             return prev;
           });
@@ -476,7 +490,16 @@ const LeadsAdmin: React.FC = () => {
 
   const contact = selected?.contact;
   const isRegistered = !!(contact?.user_id || selected?.linked_user_id);
-  const sortedMessages = selected?.messages?.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) || [];
+  const sortedMessages = selected?.messages ? dedupeAndSortMessages(selected.messages) : [];
+
+  // Dev-mode diagnostic: detect duplicate message IDs
+  if (import.meta.env.DEV && sortedMessages.length) {
+    const ids = sortedMessages.map(m => m.id).filter(Boolean);
+    const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
+    if (duplicateIds.length) {
+      console.warn('[CRM Admin] Duplicate message ids detected:', duplicateIds);
+    }
+  }
   
   const handleSendReply = async () => {
     if (!replyText.trim() || !selected) return;
@@ -506,17 +529,18 @@ const LeadsAdmin: React.FC = () => {
       
       const newMsg = data?.message;
       if (!newMsg) throw new Error('Reply succeeded but no message was returned');
+
       const updatedStatus = data?.newStatus || replyStatus;
       const nowIso = new Date().toISOString();
 
       setSelected(prev => {
         if (!prev) return prev;
-        return { ...prev, status: updatedStatus, last_admin_reply_at: nowIso, messages: [...prev.messages, newMsg] };
+        return { ...prev, status: updatedStatus, last_admin_reply_at: nowIso, messages: dedupeAndSortMessages([...prev.messages, newMsg]) };
       });
 
       setConversations(prev => prev.map(c => {
         if (c.id === selected.id) {
-          return { ...c, status: updatedStatus, last_admin_reply_at: nowIso, messages: [...c.messages, newMsg] };
+          return { ...c, status: updatedStatus, last_admin_reply_at: nowIso, messages: dedupeAndSortMessages([...c.messages, newMsg]) };
         }
         return c;
       }));

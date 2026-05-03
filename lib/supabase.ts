@@ -26,6 +26,11 @@ export const supabase = createClient(
  * (e.g. after HMR, or a race with onAuthStateChange). In that case
  * we fall back to getUser(), which makes a network call and
  * re-hydrates the session in the client, then retry getSession().
+ *
+ * Token refresh is handled automatically by the Supabase client
+ * (autoRefreshToken: true), so this helper never calls refreshSession()
+ * directly — doing so races with concurrent calls and can invalidate
+ * the session.
  */
 export async function getAuthenticatedAccessToken(): Promise<string> {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();

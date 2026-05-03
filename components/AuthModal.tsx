@@ -1,6 +1,5 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Session } from '@supabase/supabase-js';
-import { useNavigate, useLocation } from 'react-router-dom';
 import AuthPanel from './AuthPanel';
 
 interface AuthModalProps {
@@ -9,25 +8,13 @@ interface AuthModalProps {
   onClose: () => void;
 }
 
+/**
+ * Pure UI modal for authentication.
+ * Post-login redirect is handled by App.tsx's onAuthStateChange handler,
+ * which is stable and always mounted — unlike this component which
+ * unmounts when authModalMode is set to null.
+ */
 const AuthModal: React.FC<AuthModalProps> = ({ initialMode, session, onClose }) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  // Handle redirect-after-login flow
-  useEffect(() => {
-    if (session) {
-      // If the user was redirected here from a protected route, send them back
-      const from = (location.state as any)?.from?.pathname;
-      if (from) {
-        navigate(from, { replace: true });
-      } else {
-        // Navigate directly to the account dashboard after sign-in
-        onClose();
-        navigate('/account', { replace: true });
-      }
-    }
-  }, [session, navigate, location, onClose]);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}

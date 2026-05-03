@@ -1,7 +1,52 @@
 project_id = "wtgkeytabshxtspjoegb"
 
+# ── Functions that handle JWT validation manually ──
+# These read the Authorization header, extract the Bearer token,
+# and validate it via supabase.auth.getUser(token) inside the function.
+# Gateway JWT verification must be disabled so the request reaches
+# the function's own auth logic.
+
 [functions.create-checkout-session]
 verify_jwt = false
 
 [functions.contact-form-submit]
+verify_jwt = false
+
+[functions.dashboard-ticket-submit]
+verify_jwt = false
+
+[functions.customer-crm-reply]
+verify_jwt = false
+
+[functions.admin-crm-reply]
+verify_jwt = false
+
+[functions.claim-purchases]
+verify_jwt = false
+
+[functions.send-ops-email]
+verify_jwt = false
+
+[functions.resend-transactional-email]
+verify_jwt = false
+
+[functions.admin-update-account-status]
+verify_jwt = false
+
+[functions.admin-send-password-reset]
+verify_jwt = false
+
+[functions.admin-force-claim]
+verify_jwt = false
+
+[functions.create-billing-portal-session]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.resend-inbound-webhook]
+verify_jwt = false
+
+[functions.generate-download]
 verify_jwt = false

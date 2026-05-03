@@ -1,6 +1,6 @@
-import React, { useEffect, useState, createContext, useContext } from 'react';
+import React, { useEffect, useState, useRef, createContext, useContext } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { Routes, Route, useLocation, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate, Navigate, Outlet } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import LaunchAdvantage from './components/LaunchAdvantage';
@@ -62,6 +62,15 @@ function App() {
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Ref so the onAuthStateChange closure always reads the latest modal state
+  const authModalModeRef = useRef(authModalMode);
+  authModalModeRef.current = authModalMode;
+
+  // Ref to track the location state when the auth modal was opened
+  // (ProtectedRoute stores { from: location } here)
+  const authRedirectFromRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -71,18 +80,35 @@ function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession ?? null);
       setIsLoadingSession(false);
+
+      // Post-login redirect: only when signing in through the auth modal
+      if (event === 'SIGNED_IN' && nextSession && authModalModeRef.current) {
+        // Close the modal
+        setAuthModalMode(null);
+
+        // Redirect to the originally requested page, or default to /account
+        const destination = authRedirectFromRef.current || '/account';
+        authRedirectFromRef.current = undefined;
+        navigate(destination, { replace: true });
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     // If redirected from ProtectedRoute, auth query param will be present
     const searchParams = new URLSearchParams(location.search);
     if (searchParams.get('auth') === 'signin' && !session && !isLoadingSession) {
+      // Capture the protected route the user was trying to access
+      const fromPath = (location.state as any)?.from?.pathname;
+      if (fromPath) {
+        authRedirectFromRef.current = fromPath;
+      }
+
       setAuthModalMode('signin');
       // Clear the query param so it doesn't re-trigger on reload/hot-reload
       searchParams.delete('auth');
