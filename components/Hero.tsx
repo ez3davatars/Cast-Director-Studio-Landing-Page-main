@@ -138,53 +138,83 @@ export default function Hero() {
             Built for creators who need consistent characters, production-ready subject lighting, and faster production workflows.
           </p>
 
-          {/* Feature Cards — normal flow, pushed lower */}
-          <div className="relative z-30 mt-20 w-full lg:mt-24 xl:mt-28">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-slate-300 max-w-[900px] mx-auto">
-              <div className="group rounded-2xl px-6 py-5 flex items-start gap-4 bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.12] transition-all duration-300 hover:bg-white/[0.05] backdrop-blur-sm">
-                <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-lg bg-nano-yellow/10 border border-nano-yellow/20 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-nano-yellow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
+          {/* Feature Rail — Premium Director Control Rail */}
+          <div className="self-start relative left-1/2 z-30 mt-20 w-[min(1180px,calc(100vw-48px))] -translate-x-1/2 lg:mt-24 xl:mt-28">
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950/75 p-3 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-md">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.04] via-transparent to-nano-yellow/[0.04]" />
+              
+              <div className="relative grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 text-left">
+                
+                {/* Segment 1 */}
+                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
+                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
+                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
+                  <div className="relative flex flex-col gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
+                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Reusable Actors</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Create once. Direct across multiple shots.</div>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-[14px] font-semibold text-white mb-1">Reusable Actors</div>
-                  <div className="text-[13px] leading-relaxed text-slate-400">Create once, direct across multiple shots.</div>
+
+                {/* Segment 2 */}
+                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
+                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
+                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
+                  <div className="relative flex flex-col gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
+                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Studio Lighting</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Clean, readable subjects for image and video workflows.</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="group rounded-2xl px-6 py-5 flex items-start gap-4 bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.12] transition-all duration-300 hover:bg-white/[0.05] backdrop-blur-sm">
-                <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                  </svg>
+
+                {/* Segment 3 */}
+                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
+                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
+                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
+                  <div className="relative flex flex-col gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
+                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Wardrobe + Props</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Guide outfits, accessories, objects, and environments.</div>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-[14px] font-semibold text-white mb-1">Studio Subject Lighting</div>
-                  <div className="text-[13px] leading-relaxed text-slate-400">Generate clean, readable actors, outfits, products, and characters for image and video workflows.</div>
+
+                {/* Segment 4 */}
+                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
+                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
+                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
+                  <div className="relative flex flex-col gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
+                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Desktop-First Control</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Keep tighter control over references and creative assets.</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="group rounded-2xl px-6 py-5 flex items-start gap-4 bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.12] transition-all duration-300 hover:bg-white/[0.05] backdrop-blur-sm">
-                <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-[14px] font-semibold text-white mb-1">Wardrobe, Props & Scenes</div>
-                  <div className="text-[13px] leading-relaxed text-slate-400">Guide outfits, accessories, objects, and environments faster.</div>
-                </div>
-              </div>
-              <div className="group rounded-2xl px-6 py-5 flex items-start gap-4 bg-nano-yellow/[0.04] border border-nano-yellow/20 hover:border-nano-yellow/40 transition-all duration-300 hover:bg-nano-yellow/[0.07] backdrop-blur-sm shadow-[0_0_30px_-10px_rgba(250,204,21,0.1)]">
-                <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-lg bg-nano-yellow/15 border border-nano-yellow/30 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-nano-yellow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-[14px] font-semibold text-nano-yellow mb-1">Desktop-First Control</div>
-                  <div className="text-[13px] leading-relaxed text-slate-300">Keep tighter control over your workflow, references, and creative assets.</div>
-                </div>
+
               </div>
             </div>
           </div>

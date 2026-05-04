@@ -168,7 +168,7 @@
 
 .hero-character {
   position: absolute;
-  bottom: 24%;
+  bottom: 16%;
   z-index: 10;
   pointer-events: none;
   user-select: none;
