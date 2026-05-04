@@ -30,8 +30,8 @@ const Navbar: React.FC<NavbarProps> = ({
 
   const navLinks = [
     { name: 'Workflow', href: '/#workflow' },
-    { name: 'Studio Access', href: '/#pricing' },
-    { name: 'Account', href: '/account' },
+    { name: 'Production Pipeline', href: '/#pipeline' },
+    { name: 'View Pricing', href: '/#pricing' },
   ];
 
   return (
@@ -91,22 +91,13 @@ const Navbar: React.FC<NavbarProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={onSignIn}
-                  className="px-5 py-2.5 rounded-full border border-transparent text-white text-[13px] font-semibold uppercase tracking-wide hover:bg-white/5 transition-colors"
-                >
-                  Sign In
-                </button>
-                <button
-                  type="button"
-                  onClick={onCreateAccount}
-                  className="px-6 py-2.5 rounded-full bg-nano-yellow text-black text-[13px] font-bold uppercase tracking-wide hover:bg-[#eab308] hover:shadow-[0_0_15px_rgba(250,204,21,0.2)] transition-all ring-1 ring-nano-yellow/20"
-                >
-                  Create Account
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={onSignIn}
+                className="px-6 py-2.5 rounded-full bg-nano-yellow text-black text-[13px] font-bold uppercase tracking-wide hover:bg-[#eab308] hover:shadow-[0_0_15px_rgba(250,204,21,0.2)] transition-all ring-1 ring-nano-yellow/20"
+              >
+                Customer Portal
+              </button>
             )}
           </nav>
 
@@ -148,28 +139,16 @@ const Navbar: React.FC<NavbarProps> = ({
                   </button>
                 </>
               ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      onSignIn();
-                    }}
-                    className="w-full px-4 py-3 border border-nano-border text-white text-sm uppercase tracking-wide hover:bg-white/10 transition-colors"
-                  >
-                    Sign In
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      onCreateAccount();
-                    }}
-                    className="w-full px-4 py-3 bg-nano-yellow text-black text-sm font-bold uppercase tracking-wide hover:bg-nano-gold transition-colors"
-                  >
-                    Create Account
-                  </button>
-                </>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onSignIn();
+                  }}
+                  className="w-full px-4 py-3 bg-nano-yellow text-black text-sm font-bold uppercase tracking-wide hover:bg-nano-gold transition-colors"
+                >
+                  Customer Portal
+                </button>
               )}
             </div>
           </div>

@@ -4,7 +4,7 @@ export default function LaunchAdvantage() {
   const revealRef = useScrollReveal({ staggerDelay: 250 });
 
   return (
-    <section className="px-6 py-14 md:py-16 relative">
+    <section id="pipeline" className="px-6 py-14 md:py-16 relative">
       {/* Section atmosphere — warm-to-cool gradient band */}
       <div className="absolute inset-0 bg-gradient-to-b from-nano-surface1 via-[#060e1f] to-[#030712] pointer-events-none" />
 
