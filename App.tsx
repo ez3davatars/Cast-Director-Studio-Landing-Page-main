@@ -40,6 +40,7 @@ import About from './pages/About';
 import Careers from './pages/Careers';
 import Contact from './pages/Contact';
 import ResetPassword from './pages/ResetPassword';
+import ScrollToTop from './components/ScrollToTop';
 import { supabase } from './lib/supabase';
 
 // ---------- Auth Context ----------
@@ -157,6 +158,7 @@ function App() {
   return (
     <AuthContext.Provider value={{ session, openCreateAccount, openSignIn }}>
       <div className="min-h-screen bg-nano-dark text-white relative">
+        <ScrollToTop />
         {authModalMode && (
           <AuthModal
             initialMode={authModalMode}
