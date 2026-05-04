@@ -15,7 +15,7 @@
   }
 
   /* ─── Premium Surface Classes ─── */
-  
+
   .glass-panel {
     @apply bg-white/[0.03] backdrop-blur-md border border-white/10 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.5)];
   }
@@ -62,19 +62,19 @@
 
   .grid-texture {
     background-size: 40px 40px;
-    background-image: linear-gradient(to right, rgba(255,255,255,0.015) 1px, transparent 1px),
-                      linear-gradient(to bottom, rgba(255,255,255,0.015) 1px, transparent 1px);
+    background-image: linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
   }
 
   .cinematic-texture {
-    background-image: radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-image: radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px);
     background-size: 24px 24px;
   }
 
   .surface-noise {
-    background-image: 
-      radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-      radial-gradient(rgba(255,255,255,0.015) 1px, transparent 1px);
+    background-image:
+      radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      radial-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px);
     background-size: 24px 24px, 16px 16px;
     background-position: 0 0, 8px 8px;
   }
@@ -123,7 +123,7 @@
   opacity: 0 !important;
   will-change: transform, opacity;
   transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 1s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    transform 1s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 [data-reveal="up"] {
@@ -153,5 +153,179 @@
     opacity: 1 !important;
     transform: none !important;
     transition: none !important;
+  }
+}
+/* ─── Hero Shell — CSS Variable Responsive System ─── */
+
+.hero-shell {
+  --hero-left-width: clamp(460px, 41vw, 820px);
+  --hero-right-width: clamp(480px, 43vw, 860px);
+  --hero-left-offset: clamp(-110px, -5vw, -32px);
+  --hero-right-offset: clamp(-120px, -5.5vw, -36px);
+}
+
+/* ─── Hero Character Base ─── */
+
+.hero-character {
+  position: absolute;
+  bottom: 24%;
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+  will-change: transform, opacity, filter;
+  transition:
+    width 220ms ease,
+    left 220ms ease,
+    right 220ms ease,
+    opacity 220ms ease;
+}
+
+.hero-character-left {
+  left: var(--hero-left-offset);
+  width: var(--hero-left-width);
+}
+
+.hero-character-right {
+  right: var(--hero-right-offset);
+  width: var(--hero-right-width);
+}
+
+/* Character image — large cinematic portrait */
+.hero-character__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: bottom center;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 1.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Left character: fade right + bottom edges */
+.hero-character__img--left {
+  -webkit-mask-image:
+    linear-gradient(to left, transparent 0%, rgba(0,0,0,0.4) 8%, black 25%),
+    linear-gradient(to top, transparent 0%, rgba(0,0,0,0.6) 6%, black 18%);
+  mask-image:
+    linear-gradient(to left, transparent 0%, rgba(0,0,0,0.4) 8%, black 25%),
+    linear-gradient(to top, transparent 0%, rgba(0,0,0,0.6) 6%, black 18%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+/* Right character: fade left + bottom edges */
+.hero-character__img--right {
+  -webkit-mask-image:
+    linear-gradient(to right, transparent 0%, rgba(0,0,0,0.4) 8%, black 25%),
+    linear-gradient(to top, transparent 0%, rgba(0,0,0,0.6) 6%, black 18%);
+  mask-image:
+    linear-gradient(to right, transparent 0%, rgba(0,0,0,0.4) 8%, black 25%),
+    linear-gradient(to top, transparent 0%, rgba(0,0,0,0.6) 6%, black 18%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.hero-character__img--visible {
+  opacity: 1;
+  transform: translateY(0);
+  animation: heroIdleFloat 7s ease-in-out infinite;
+}
+
+/* Radial glow backdrop behind each character */
+.hero-character__glow {
+  position: absolute;
+  bottom: 10%;
+  width: 140%;
+  height: 90%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.hero-character__glow--left {
+  left: -20%;
+  background: radial-gradient(ellipse 70% 60% at 60% 50%,
+      rgba(59, 130, 246, 0.10) 0%,
+      rgba(59, 130, 246, 0.04) 40%,
+      transparent 70%);
+}
+
+.hero-character__glow--right {
+  right: -20%;
+  background: radial-gradient(ellipse 70% 60% at 40% 50%,
+      rgba(245, 158, 11, 0.10) 0%,
+      rgba(245, 158, 11, 0.04) 40%,
+      transparent 70%);
+}
+
+/* ─── Idle Float Keyframes ─── */
+
+@keyframes heroIdleFloat {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+/* ─── Responsive Breakpoints ─── */
+
+/* Medium desktop / laptop */
+@media (max-width: 1439px) {
+  .hero-shell {
+    --hero-left-width: clamp(360px, 34vw, 620px);
+    --hero-right-width: clamp(380px, 36vw, 660px);
+    --hero-left-offset: -100px;
+    --hero-right-offset: -112px;
+  }
+}
+
+/* Small desktop / tablet */
+@media (max-width: 1199px) {
+  .hero-shell {
+    --hero-left-width: clamp(280px, 30vw, 460px);
+    --hero-right-width: clamp(300px, 32vw, 500px);
+    --hero-left-offset: -125px;
+    --hero-right-offset: -140px;
+  }
+  .hero-character {
+    opacity: 0.82;
+  }
+}
+
+/* Narrow tablet */
+@media (max-width: 1023px) {
+  .hero-shell {
+    --hero-left-width: clamp(220px, 28vw, 360px);
+    --hero-right-width: clamp(230px, 30vw, 380px);
+    --hero-left-offset: -145px;
+    --hero-right-offset: -160px;
+  }
+  .hero-character {
+    opacity: 0.55;
+  }
+}
+
+/* Mobile: hide before overlap happens */
+@media (max-width: 899px) {
+  .hero-character {
+    display: none;
+  }
+}
+
+/* ─── Reduced Motion for Stage Characters ─── */
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-character__img--visible {
+    animation: none;
+  }
+  .hero-character {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
   }
 }
