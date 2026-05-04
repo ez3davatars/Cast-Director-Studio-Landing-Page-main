@@ -16,6 +16,7 @@ const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isOnDashboard = typeof window !== 'undefined' && window.location.pathname === '/account';
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -78,14 +79,19 @@ const Navbar: React.FC<NavbarProps> = ({
             )}
 
             {session ? (
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 max-w-[220px] truncate font-medium">
-                  {session.user.email}
-                </span>
+              <div className="flex items-center gap-5">
+                {!isOnDashboard && (
+                  <a
+                    href="/account"
+                    className="text-[13px] font-semibold uppercase tracking-[0.1em] text-slate-400 hover:text-white transition-colors"
+                  >
+                    Dashboard
+                  </a>
+                )}
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className="px-5 py-2.5 rounded-full border border-white/10 text-white text-[13px] font-semibold uppercase tracking-wide hover:bg-white/5 transition-colors"
+                  className="text-[13px] font-semibold uppercase tracking-[0.1em] text-slate-400 hover:text-white transition-colors"
                 >
                   Sign Out
                 </button>
@@ -127,9 +133,15 @@ const Navbar: React.FC<NavbarProps> = ({
 
               {session ? (
                 <>
-                  <div className="text-sm text-nano-text break-all">
-                    {session.user.email}
-                  </div>
+                  {!isOnDashboard && (
+                    <a
+                      href="/account"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="text-sm uppercase tracking-wide text-nano-text hover:text-white transition-colors"
+                    >
+                      Dashboard
+                    </a>
+                  )}
                   <button
                     type="button"
                     onClick={handleSignOut}
