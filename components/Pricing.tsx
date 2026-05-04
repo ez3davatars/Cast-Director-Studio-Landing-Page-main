@@ -219,10 +219,9 @@ const Pricing: React.FC<PricingProps> = ({
       const { data: { session: activeSession }, error: authError } = await supabase.auth.getSession();
       
       if (!activeSession || !activeSession.access_token || authError) {
-        setCheckoutError("No valid access token available. Please sign in to verify your identity.");
-        await supabase.auth.signOut();
-        onSignIn();
-        setCheckingOutProductId(null);
+        // Session is stale or missing — fall back to guest checkout instead of blocking
+        console.warn('No valid session for authenticated checkout, falling back to guest checkout.');
+        await executeGuestCheckout(product);
         return;
       }
 
@@ -236,40 +235,70 @@ const Pricing: React.FC<PricingProps> = ({
       }
 
       const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
-      
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-        body: { 
+
+      // Use raw fetch instead of supabase.functions.invoke for proper error body parsing
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+      const functionUrl = `${supabaseUrl}/functions/v1/create-checkout-session`;
+
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${activeSession.access_token}`,
+        },
+        body: JSON.stringify({
           priceId: product.stripe_price_id,
           successUrl: returnUrl,
           cancelUrl: `${window.location.origin}/#pricing`,
-          allowDuplicatePurchase
-        }
+          allowDuplicatePurchase,
+        }),
       });
 
-      if (error) {
-        if (error.message?.includes('401') || error.message?.includes('non-2xx') || error.message?.includes('409') || error.message?.includes('duplicate_purchase')) {
-            let parsedErr;
-            try { parsedErr = await error.context?.json?.(); } catch(e){}
-            
-            if ((parsedErr && parsedErr.error === 'duplicate_purchase') || error.message.includes('409') || error.message.includes('duplicate_purchase')) {
-                setCheckoutError("Server blocked purchase to prevent a duplicate charge. Please check your dashboard.");
-            } else {
-                setCheckoutError("Checkout was rejected by the server. " + (parsedErr?.message || error.message));
-            }
-            throw new Error("Rejected by checkout Edge Function.");
-        }
-        throw new Error(error.message || "Failed to establish secure connection.");
+      let responseBody: any = null;
+      try {
+        responseBody = await response.json();
+      } catch {
+        responseBody = await response.text();
       }
 
-      if (data?.url) {
-        window.location.href = data.url;
+      if (!response.ok) {
+        console.error('Checkout Edge Function rejected request:', {
+          status: response.status,
+          responseBody,
+          priceId: product.stripe_price_id,
+        });
+
+        // Surface the real server error message
+        const serverMessage = responseBody?.message || responseBody?.error || `Checkout failed with status ${response.status}`;
+
+        if (response.status === 409 && (responseBody?.code === 'duplicate_purchase' || responseBody?.error === 'duplicate_purchase')) {
+          setCheckoutError(serverMessage);
+        } else if (response.status === 401) {
+          // JWT expired or invalid — fall back to guest checkout
+          console.warn('Auth rejected by Edge Function, falling back to guest checkout.');
+          await executeGuestCheckout(product);
+          return;
+        } else {
+          setCheckoutError(serverMessage);
+        }
+
+        throw new Error(serverMessage);
+      }
+
+      if (responseBody?.url) {
+        window.location.href = responseBody.url;
       } else {
-        throw new Error("Checkout session URL was not returned by the server.");
+        console.error('Checkout Edge Function returned no checkout URL:', responseBody);
+        throw new Error('Checkout session was created but no checkout URL was returned.');
       }
 
     } catch (err: any) {
       console.error("Checkout launch failed:", err);
-      setCheckoutError(err.message || "An unexpected error occurred during checkout initialization.");
+      if (!checkoutError) {
+        setCheckoutError(err.message || "An unexpected error occurred during checkout initialization.");
+      }
     } finally {
       if (!window.location.href.includes('stripe')) setCheckingOutProductId(null);
     }
@@ -313,17 +342,29 @@ const Pricing: React.FC<PricingProps> = ({
         }),
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.message || `Checkout failed (${response.status})`);
+      let responseBody: any = null;
+      try {
+        responseBody = await response.json();
+      } catch {
+        responseBody = await response.text();
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        console.error('Guest checkout Edge Function rejected request:', {
+          status: response.status,
+          responseBody,
+          priceId: product.stripe_price_id,
+        });
 
-      if (data?.url) {
-        window.location.href = data.url;
+        const serverMessage = responseBody?.message || responseBody?.error || `Checkout failed with status ${response.status}`;
+        throw new Error(serverMessage);
+      }
+
+      if (responseBody?.url) {
+        window.location.href = responseBody.url;
       } else {
-        throw new Error('Checkout session URL was not returned by the server.');
+        console.error('Guest checkout returned no checkout URL:', responseBody);
+        throw new Error('Checkout session was created but no checkout URL was returned.');
       }
     } catch (err: any) {
       console.error('Guest checkout failed:', err);

@@ -179,6 +179,12 @@ serve(async (req: Request) => {
         }
 
         if (blockReason && allowDuplicatePurchase !== true) {
+            console.log(`[create-checkout-session] Blocking duplicate purchase for user ${user.id}:`, {
+              blockReason,
+              productKey: product.product_key,
+              productName: product.name,
+              priceId,
+            });
             return new Response(JSON.stringify({ 
                 error: "duplicate_purchase",
                 code: "duplicate_purchase",
