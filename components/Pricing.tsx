@@ -250,6 +250,8 @@ const Pricing: React.FC<PricingProps> = ({
         },
         body: JSON.stringify({
           priceId: product.stripe_price_id,
+          mode: catalogEntry?.checkoutMode || 'payment',
+          productKey: catalogEntry?.productKey || product.product_key || 'unknown',
           successUrl: returnUrl,
           cancelUrl: `${window.location.origin}/#pricing`,
           allowDuplicatePurchase,
@@ -336,6 +338,8 @@ const Pricing: React.FC<PricingProps> = ({
         },
         body: JSON.stringify({
           priceId: product.stripe_price_id,
+          mode: catalogEntry?.checkoutMode || 'payment',
+          productKey: catalogEntry?.productKey || product.product_key || 'unknown',
           successUrl,
           cancelUrl,
           guestCheckout: true,

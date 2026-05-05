@@ -239,6 +239,7 @@ serve(async (req: Request) => {
               license_type: 'perpetual',
               status: 'active',
               max_activations: (productKey === 'agency_desktop_byok' || product.name.toLowerCase().includes('agency')) ? 3 : 1,
+              device_limit: (productKey === 'agency_commercial_byok' || productKey === 'agency_desktop_byok' || product.name.toLowerCase().includes('agency')) ? 5 : 2,
               updates_expires_at: updatesExpires.toISOString(),
               support_expires_at: updatesExpires.toISOString(),
           }]).select().single();

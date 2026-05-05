@@ -8,11 +8,14 @@ export type ProductKey =
   | 'credit_pack_100'
   | 'credit_pack_500'
 
+export type CheckoutMode = 'payment' | 'subscription';
+
 export type ProductCatalogEntry = {
   productKey: ProductKey
   displayName: string
   stripePriceIds: string[]
   productType: 'desktop_license' | 'support_plan' | 'subscription' | 'downloadable' | 'credit_topup'
+  checkoutMode: CheckoutMode
   licenseType?: 'perpetual' | 'subscription' | 'trial'
   platform?: 'Windows' | 'Mac' | 'Linux'
   fileType?: string
@@ -25,6 +28,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: 'Indie Desktop BYOK',
     stripePriceIds: ['price_1TC6vuDETDyl6ph1S1HnhYPM', 'price_1TC59GDETDyl6ph1Vift3EjC'],
     productType: 'desktop_license',
+    checkoutMode: 'payment',
     licenseType: 'perpetual',
     platform: 'Windows',
     fileType: 'Installer (.exe)',
@@ -35,6 +39,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: 'Indie Updates & Support',
     stripePriceIds: ['price_1TRiIDDETDyl6ph1fH7tNwvd', 'price_1TCXVpDETDyl6ph1VcnFflZ5'],
     productType: 'support_plan',
+    checkoutMode: 'subscription',
     duplicatePolicy: 'warn',
   },
   starter: {
@@ -42,6 +47,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: 'Starter',
     stripePriceIds: ['price_1TRiI1DETDyl6ph1Hv32GRBU', 'price_1TC4FLDETDyl6ph12zMfVdoP'],
     productType: 'subscription',
+    checkoutMode: 'subscription',
     duplicatePolicy: 'warn',
   },
   pro: {
@@ -49,6 +55,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: 'Pro',
     stripePriceIds: ['price_1TRifODETDyl6ph1jkZefNuv', 'price_1TC4QgDETDyl6ph1ydjJICil'],
     productType: 'subscription',
+    checkoutMode: 'subscription',
     duplicatePolicy: 'warn',
   },
   agency_desktop_byok: {
@@ -56,6 +63,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: 'Agency Commercial BYOK',
     stripePriceIds: ['price_1TRiIDDETDyl6ph1oltjWtaM', 'price_1TC5ABDETDyl6ph1Um6in8g6'],
     productType: 'desktop_license',
+    checkoutMode: 'payment',
     licenseType: 'perpetual',
     platform: 'Windows',
     fileType: 'Installer (.exe)',
@@ -66,6 +74,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: 'Agency Updates & Priority Support',
     stripePriceIds: ['price_1TRiIEDETDyl6ph1K2Rsnrpf', 'price_1TC5E2DETDyl6ph1kOigQu2u'],
     productType: 'support_plan',
+    checkoutMode: 'subscription',
     duplicatePolicy: 'warn',
   },
   credit_pack_100: {
@@ -73,6 +82,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: '100 Credit Pack',
     stripePriceIds: ['price_1TRiIEDETDyl6ph1OIY2Kw3v'],
     productType: 'credit_topup',
+    checkoutMode: 'payment',
     duplicatePolicy: 'allow',
   },
   credit_pack_500: {
@@ -80,6 +90,7 @@ export const SHARED_PRODUCT_CATALOG: Record<ProductKey, ProductCatalogEntry> = {
     displayName: '500 Credit Pack',
     stripePriceIds: ['price_1TRiIFDETDyl6ph1mOZYr8zc'],
     productType: 'credit_topup',
+    checkoutMode: 'payment',
     duplicatePolicy: 'allow',
   },
 }

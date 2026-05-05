@@ -5,7 +5,20 @@ import { Session } from '@supabase/supabase-js';
 import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
-import { Loader2, Info, MessageSquare, LifeBuoy } from 'lucide-react';
+import { Loader2, Info, MessageSquare, LifeBuoy, Monitor, Smartphone, Laptop, X } from 'lucide-react';
+
+interface DeviceActivation {
+    id: string;
+    license_id: string;
+    device_fingerprint: string;
+    device_label: string;
+    platform: string;
+    app_version: string | null;
+    status: string;
+    first_activated_at: string;
+    last_seen_at: string;
+    deactivated_at: string | null;
+}
 
 interface AccountDashboardProps {
     session: Session;
@@ -52,6 +65,12 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         setUnreadTicketCount(count);
         setUnreadTickets(tickets);
     }, []);
+
+    // Device activations
+    const [deviceActivations, setDeviceActivations] = useState<DeviceActivation[]>([]);
+    const [deviceLimit, setDeviceLimit] = useState<number>(2);
+    const [deactivatingDeviceId, setDeactivatingDeviceId] = useState<string | null>(null);
+    const [deviceError, setDeviceError] = useState<string | null>(null);
 
     // BYOK license status
     const [byokError, setByokError] = useState<string | null>(null);
@@ -359,6 +378,29 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 proExpiration: proSub?.current_period_end ? new Date(proSub.current_period_end) : null,
             });
 
+            // Fetch device activations
+            try {
+                const { data: activations } = await supabase
+                    .from('device_activations')
+                    .select('*')
+                    .eq('user_id', session.user.id)
+                    .order('first_activated_at', { ascending: false });
+
+                if (activations) {
+                    setDeviceActivations(activations);
+                }
+
+                // Determine device limit from strongest license
+                const bestLicense = fetchedLicenses
+                    .filter((l: any) => l.status === 'active')
+                    .sort((a: any, b: any) => (b.device_limit || 2) - (a.device_limit || 2))[0];
+                if (bestLicense?.device_limit) {
+                    setDeviceLimit(bestLicense.device_limit);
+                }
+            } catch (e) {
+                console.warn('[Dashboard] device_activations fetch failed (table may not exist yet):', e);
+            }
+
             const lacksData = fetchedOrders.length === 0 && fetchedLicenses.length === 0 && fetchedDownloads.length === 0;
             if (lacksData && session.user.email) {
                 const guestCheck = await supabase.from('orders').select('id').eq('customer_email', session.user.email).is('user_id', null).limit(1).maybeSingle();
@@ -388,57 +430,61 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     }, [session.user.id, session.user.email]);
 
     // ── Credit Top-Up Checkout ──
+    // Uses productKey-only contract — the Edge Function resolves the Stripe price server-side.
+    // Credit packs always require authentication so the webhook can credit the user's balance.
     const handleTopUp = async (packKey: 'credit_pack_100' | 'credit_pack_500') => {
         setTopUpLoading(packKey);
         setTopUpError(null);
 
         try {
-            // Find the product in Supabase by product_key
-            const { data: products } = await supabase.from('products').select('*').eq('product_key', packKey).eq('is_active', true).maybeSingle();
-            const product = products;
-
-            if (!product || !product.stripe_price_id) {
-                setTopUpError('Credit pack is currently unavailable. Please try again later.');
-                return;
-            }
-
-            // Validate not a placeholder Stripe Price ID
-            if (product.stripe_price_id.startsWith('REPLACE_WITH_')) {
-                setTopUpError('Credit packs are not yet configured for checkout.');
-                return;
-            }
-
+            // 1. Require a valid session — no guest checkout for credit top-ups
             const { data: { session: activeSession } } = await supabase.auth.getSession();
             if (!activeSession?.access_token) {
-                setTopUpError('Please sign in to purchase credits.');
+                setTopUpError('Please sign in again before purchasing credits.');
                 return;
             }
 
-            const catalogEntry = resolveCatalogEntryFromDbProduct(product);
-            const successType = 'topup';
-            const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
+            // 2. Build request
+            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+            const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+            const functionUrl = `${supabaseUrl}/functions/v1/create-checkout-session`;
 
-            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-                body: {
-                    priceId: product.stripe_price_id,
-                    successUrl: returnUrl,
-                    cancelUrl: `${window.location.origin}/#pricing`,
-                }
+            const successUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=topup`;
+            const cancelUrl = `${window.location.origin}/#pricing`;
+
+            const response = await fetch(functionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': supabaseAnonKey,
+                    'Authorization': `Bearer ${activeSession.access_token}`,
+                },
+                body: JSON.stringify({
+                    productKey: packKey,
+                    successUrl,
+                    cancelUrl,
+                }),
             });
 
-            if (error) {
-                let parsedMsg = error.message || 'Checkout failed';
-                try {
-                    if (error.context && typeof error.context.json === 'function') {
-                        const body = await error.context.json();
-                        parsedMsg = body.message || body.error || parsedMsg;
-                    }
-                } catch (e) { /* ignore parse error */ }
-                throw new Error(parsedMsg);
+            let responseBody: any = null;
+            try {
+                responseBody = await response.json();
+            } catch {
+                responseBody = await response.text();
             }
 
-            if (data?.url) {
-                window.location.href = data.url;
+            if (!response.ok) {
+                console.error('Credit top-up checkout rejected:', {
+                    status: response.status,
+                    responseBody,
+                    packKey,
+                });
+                const serverMessage = responseBody?.message || responseBody?.error || `Checkout failed with status ${response.status}`;
+                throw new Error(serverMessage);
+            }
+
+            if (responseBody?.url) {
+                window.location.href = responseBody.url;
             } else {
                 throw new Error('Checkout session URL was not returned.');
             }
@@ -476,9 +522,13 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const successType = productKey.includes('updates') || productKey.includes('support') ? 'renewal' : 'byok';
             const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
 
+            const catalogEntry = resolveCatalogEntryFromDbProduct(product);
+
             const { data, error } = await supabase.functions.invoke('create-checkout-session', {
                 body: {
                     priceId: product.stripe_price_id,
+                    mode: catalogEntry?.checkoutMode || 'payment',
+                    productKey: productKey,
                     successUrl: returnUrl,
                     cancelUrl: `${window.location.origin}/#pricing`,
                 }
@@ -542,9 +592,13 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
             const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=hosted`;
 
+            const catalogEntry = resolveCatalogEntryFromDbProduct(product);
+
             const { data, error } = await supabase.functions.invoke('create-checkout-session', {
                 body: {
                     priceId: product.stripe_price_id,
+                    mode: catalogEntry?.checkoutMode || 'subscription',
+                    productKey: productKey,
                     successUrl: returnUrl,
                     cancelUrl: `${window.location.origin}/#pricing`,
                 }
@@ -579,6 +633,52 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             setSubError(err.message || 'An unexpected error occurred during checkout.');
         } finally {
             setTopUpLoading(null);
+        }
+    };
+
+    // ── Device Deactivation ──
+    const handleDeactivateDevice = async (activationId: string) => {
+        setDeactivatingDeviceId(activationId);
+        setDeviceError(null);
+
+        try {
+            const { data: { session: activeSession } } = await supabase.auth.getSession();
+            if (!activeSession?.access_token) {
+                setDeviceError('Please sign in to manage devices.');
+                return;
+            }
+
+            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+            const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+            const functionUrl = `${supabaseUrl}/functions/v1/deactivate-device`;
+
+            const response = await fetch(functionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': supabaseAnonKey,
+                    'Authorization': `Bearer ${activeSession.access_token}`,
+                },
+                body: JSON.stringify({ activationId }),
+            });
+
+            const responseBody = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(responseBody?.error || `Deactivation failed (${response.status})`);
+            }
+
+            // Update local state
+            setDeviceActivations(prev => prev.map(d =>
+                d.id === activationId
+                    ? { ...d, status: 'deactivated', deactivated_at: new Date().toISOString() }
+                    : d
+            ));
+        } catch (err: any) {
+            console.error('Device deactivation failed:', err);
+            setDeviceError(err.message || 'Failed to deactivate device.');
+        } finally {
+            setDeactivatingDeviceId(null);
         }
     };
 
@@ -1124,6 +1224,119 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     )}
                                 </div>
                             )}
+
+                            {/* Activated Devices Section */}
+                            <div id="activated-devices" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-bold">Activated Devices</h3>
+                                    {deviceActivations.filter(d => d.status === 'active').length > 0 && (
+                                        <span className="text-xs text-nano-text">
+                                            {deviceActivations.filter(d => d.status === 'active').length} of {deviceLimit} slots used
+                                        </span>
+                                    )}
+                                </div>
+
+                                {/* Usage Bar */}
+                                {deviceActivations.filter(d => d.status === 'active').length > 0 && (
+                                    <div className="mb-5">
+                                        <div className="w-full h-1.5 bg-nano-border/50 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-500 ${
+                                                    deviceActivations.filter(d => d.status === 'active').length >= deviceLimit
+                                                        ? 'bg-red-400'
+                                                        : 'bg-nano-yellow'
+                                                }`}
+                                                style={{ width: `${Math.min(100, (deviceActivations.filter(d => d.status === 'active').length / deviceLimit) * 100)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {deviceError && (
+                                    <div className="mb-4 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
+                                        {deviceError}
+                                    </div>
+                                )}
+
+                                {deviceActivations.length === 0 ? (
+                                    <div className="text-center py-8">
+                                        <Monitor size={32} className="mx-auto text-nano-text/40 mb-3" />
+                                        <p className="text-sm text-nano-text">
+                                            No devices activated yet. Open Cast Director Studio on your desktop to activate.
+                                        </p>
+                                        <p className="text-xs text-nano-text/60 mt-2">
+                                            You can activate up to {deviceLimit} device{deviceLimit !== 1 ? 's' : ''} with your current license.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {deviceActivations.map((device) => {
+                                            const isActive = device.status === 'active';
+                                            const platformIcon = device.platform?.toLowerCase().includes('mac')
+                                                ? <Laptop size={16} className="flex-shrink-0" />
+                                                : device.platform?.toLowerCase().includes('mobile') || device.platform?.toLowerCase().includes('android') || device.platform?.toLowerCase().includes('ios')
+                                                    ? <Smartphone size={16} className="flex-shrink-0" />
+                                                    : <Monitor size={16} className="flex-shrink-0" />;
+
+                                            return (
+                                                <div
+                                                    key={device.id}
+                                                    className={`p-4 border text-sm flex items-start gap-4 ${
+                                                        isActive
+                                                            ? 'bg-black/30 border-nano-border/50'
+                                                            : 'bg-black/10 border-nano-border/20 opacity-50'
+                                                    }`}
+                                                >
+                                                    <div className={`mt-0.5 ${isActive ? 'text-nano-yellow' : 'text-nano-text/40'}`}>
+                                                        {platformIcon}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <span className="text-white font-medium truncate">
+                                                                {device.device_label || 'Unknown Device'}
+                                                            </span>
+                                                            {isActive ? (
+                                                                <span className="text-[9px] bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded-sm uppercase tracking-wide border border-green-500/30 flex-shrink-0">
+                                                                    Active
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[9px] bg-white/5 text-nano-text/60 px-1.5 py-0.5 rounded-sm uppercase tracking-wide border border-nano-border/20 flex-shrink-0">
+                                                                    Deactivated
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-nano-text">
+                                                            <div>Platform: <span className="text-white/70 capitalize">{device.platform || 'Unknown'}</span></div>
+                                                            {device.app_version && (
+                                                                <div>Version: <span className="text-white/70">{device.app_version}</span></div>
+                                                            )}
+                                                            <div>Activated: <span className="text-white/70">{new Date(device.first_activated_at).toLocaleDateString()}</span></div>
+                                                            <div>Last seen: <span className="text-white/70">{new Date(device.last_seen_at).toLocaleDateString()}</span></div>
+                                                        </div>
+                                                    </div>
+                                                    {isActive && (
+                                                        <button
+                                                            onClick={() => handleDeactivateDevice(device.id)}
+                                                            disabled={deactivatingDeviceId === device.id}
+                                                            className="flex-shrink-0 p-2 text-nano-text/60 hover:text-red-400 hover:bg-red-500/10 transition-all rounded-sm disabled:opacity-50"
+                                                            title="Deactivate this device"
+                                                        >
+                                                            {deactivatingDeviceId === device.id
+                                                                ? <Loader2 size={14} className="animate-spin" />
+                                                                : <X size={14} />
+                                                            }
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                <p className="text-[11px] text-nano-text/50 mt-4">
+                                    Need to move to a new device? Deactivate an existing one first, then open the app on your new device.
+                                </p>
+                            </div>
 
                             <div className="grid lg:grid-cols-2 gap-8">
                                 {/* Left Column: Purchases & Subs */}
