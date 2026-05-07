@@ -3,526 +3,524 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import Stripe from "https://esm.sh/stripe@14.14.0";
 
+// ──────────────────────────────────────────────────
+// Stripe + CORS
+// ──────────────────────────────────────────────────
+
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
   apiVersion: "2023-10-16",
 });
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
+const json = (body: Record<string, unknown>, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
 // ──────────────────────────────────────────────────
-// Type Definitions
+// PRODUCT_MAP — server-side source of truth
+// Price IDs come exclusively from Supabase secrets.
 // ──────────────────────────────────────────────────
 
 type CheckoutMode = "payment" | "subscription";
 
-interface CheckoutRequest {
-  // Price identification (accept multiple naming conventions)
-  priceId?: string;
-  price_id?: string;
-  stripe_price_id?: string;
-  // Product key (accept both casing conventions)
-  productKey?: string;
-  product_key?: string;
-  // Checkout mode
-  mode?: string;
-  // URLs
-  successUrl?: string;
-  cancelUrl?: string;
-  return_url?: string;
-  // Flags
-  guestCheckout?: boolean;
-  allowDuplicatePurchase?: boolean;
-}
-
-interface CheckoutProductConfig {
-  stripePriceId: string;
+interface ProductConfig {
+  envKey: string;
   mode: CheckoutMode;
-  productKey: string;
+  purchase_kind: string;
+  credits?: number;
+  monthly_credits?: number;
+  requiresAuth?: boolean;
 }
 
-// ──────────────────────────────────────────────────
-// Product catalog (server-side source of truth)
-// ──────────────────────────────────────────────────
-
-const PRODUCT_CONFIGS: Record<string, CheckoutProductConfig> = {
+const PRODUCT_MAP: Record<string, ProductConfig> = {
   starter_monthly: {
-    stripePriceId: "price_1TRiI1DETDyl6ph1Hv32GRBU",
+    envKey: "STRIPE_PRICE_STARTER_MONTHLY",
     mode: "subscription",
-    productKey: "starter_monthly",
+    purchase_kind: "HOSTED_SUBSCRIPTION",
+    monthly_credits: 600,
   },
   pro_monthly: {
-    stripePriceId: "price_1TRifODETDyl6ph1jkZefNuv",
+    envKey: "STRIPE_PRICE_PRO_MONTHLY",
     mode: "subscription",
-    productKey: "pro_monthly",
+    purchase_kind: "HOSTED_SUBSCRIPTION",
+    monthly_credits: 1200,
   },
   indie_desktop_byok: {
-    stripePriceId: "price_1TC6vuDETDyl6ph1S1HnhYPM",
+    envKey: "STRIPE_PRICE_INDIE_DESKTOP_BYOK",
     mode: "payment",
-    productKey: "indie_desktop_byok",
+    purchase_kind: "BYOK_LICENSE",
   },
   agency_commercial_byok: {
-    stripePriceId: "price_1TRiIDDETDyl6ph1oltjWtaM",
+    envKey: "STRIPE_PRICE_AGENCY_DESKTOP_BYOK",
     mode: "payment",
-    productKey: "agency_commercial_byok",
+    purchase_kind: "BYOK_LICENSE",
   },
   indie_updates_support: {
-    stripePriceId: "price_1TRiIDDETDyl6ph1fH7tNwvd",
+    envKey: "STRIPE_PRICE_INDIE_UPDATES_SUPPORT",
     mode: "subscription",
-    productKey: "indie_updates_support",
+    purchase_kind: "SUPPORT_RENEWAL",
   },
   agency_updates_support: {
-    stripePriceId: "price_1TRiIEDETDyl6ph1K2Rsnrpf",
+    envKey: "STRIPE_PRICE_AGENCY_UPDATES_SUPPORT",
     mode: "subscription",
-    productKey: "agency_updates_support",
+    purchase_kind: "SUPPORT_RENEWAL",
   },
   credit_pack_100: {
-    stripePriceId: "price_1TRiIEDETDyl6ph1OIY2Kw3v",
+    envKey: "STRIPE_PRICE_CREDIT_PACK_100",
     mode: "payment",
-    productKey: "credit_pack_100",
+    purchase_kind: "TOPUP_PURCHASE",
+    credits: 100,
+    requiresAuth: true,
   },
   credit_pack_500: {
-    stripePriceId: "price_1TRiIFDETDyl6ph1mOZYr8zc",
+    envKey: "STRIPE_PRICE_CREDIT_PACK_500",
     mode: "payment",
-    productKey: "credit_pack_500",
+    purchase_kind: "TOPUP_PURCHASE",
+    credits: 500,
+    requiresAuth: true,
   },
 };
 
-// Credit pack product keys that require authenticated checkout
-const AUTHENTICATED_ONLY_KEYS = new Set(["credit_pack_100", "credit_pack_500"]);
-
-// ──────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────
-
-const normalizeMode = (value: unknown): CheckoutMode => {
-  return value === "subscription" ? "subscription" : "payment";
+// Alias normalization
+const ALIASES: Record<string, string> = {
+  agency_desktop_byok: "agency_commercial_byok",
+  starter: "starter_monthly",
+  pro: "pro_monthly",
 };
 
-/**
- * Resolve a CheckoutProductConfig from the request body.
- * Priority: explicit product_key lookup → legacy priceId with mode from body.
- */
-function resolveProductConfig(body: CheckoutRequest): CheckoutProductConfig | null {
-  const requestedKey = body.productKey || body.product_key;
-  const legacyPriceId = body.priceId || body.price_id || body.stripe_price_id;
+// Non-repeatable product keys — duplicates are blocked for authenticated users
+const NON_REPEATABLE_KEYS = new Set([
+  "starter_monthly",
+  "pro_monthly",
+  "indie_desktop_byok",
+  "agency_commercial_byok",
+]);
 
-  // 1. Direct product_key lookup
-  if (requestedKey && PRODUCT_CONFIGS[requestedKey]) {
-    return PRODUCT_CONFIGS[requestedKey];
+// ──────────────────────────────────────────────────
+// Duplicate Purchase Guard (helper)
+// ──────────────────────────────────────────────────
+
+async function checkDuplicatePurchase(
+  supabaseAdmin: any,
+  userId: string,
+  productKey: string,
+  priceId: string
+): Promise<string | null> {
+  if (!NON_REPEATABLE_KEYS.has(productKey)) return null;
+
+  // Check active subscriptions
+  const { data: activeSubs } = await supabaseAdmin
+    .from("subscriptions")
+    .select("id, metadata, status")
+    .eq("user_id", userId)
+    .ilike("status", "active");
+
+  // Check active licenses
+  const { data: activeLicenses } = await supabaseAdmin
+    .from("licenses")
+    .select("id, stripe_price_id, product_id, products ( product_key )")
+    .eq("user_id", userId)
+    .ilike("status", "active");
+
+  // Subscription products: starter_monthly, pro_monthly
+  if (productKey === "starter_monthly" || productKey === "pro_monthly") {
+    const hasMatch = activeSubs?.some(
+      (s: any) =>
+        s.metadata?.product_key === productKey ||
+        s.metadata?.stripe_price_id === priceId
+    );
+    if (hasMatch) return "active_subscription_exists";
   }
 
-  // 2. Try to find config by matching Stripe price ID across known products
-  if (legacyPriceId) {
-    const matchedConfig = Object.values(PRODUCT_CONFIGS).find(
-      (c) => c.stripePriceId === legacyPriceId
+  // License products: indie_desktop_byok, agency_commercial_byok
+  if (
+    productKey === "indie_desktop_byok" ||
+    productKey === "agency_commercial_byok"
+  ) {
+    const matchKey =
+      productKey === "agency_commercial_byok"
+        ? "agency_desktop_byok"
+        : productKey;
+    const hasMatch = activeLicenses?.some(
+      (l: any) =>
+        l.products?.product_key === productKey ||
+        l.products?.product_key === matchKey ||
+        l.stripe_price_id === priceId
     );
-    if (matchedConfig) {
-      return matchedConfig;
-    }
+    if (hasMatch) return "active_license_exists";
 
-    // 3. Legacy priceId checkout — use body.mode instead of defaulting blindly to payment
-    const requestedMode = normalizeMode(body.mode);
-    return {
-      stripePriceId: legacyPriceId,
-      mode: requestedMode,
-      productKey: String(requestedKey || "legacy_price_checkout"),
-    };
+    // Cross-tier: block indie if agency is already owned
+    if (productKey === "indie_desktop_byok") {
+      const hasAgency = activeLicenses?.some(
+        (l: any) =>
+          l.products?.product_key === "agency_desktop_byok" ||
+          l.products?.product_key === "agency_commercial_byok"
+      );
+      if (hasAgency) return "higher_tier_owned";
+    }
   }
 
   return null;
 }
 
+// ──────────────────────────────────────────────────
+// Stripe Customer Resolution (helper)
+// ──────────────────────────────────────────────────
+
+async function resolveStripeCustomer(
+  supabaseAdmin: any,
+  userId: string,
+  email: string
+): Promise<string | null> {
+  try {
+    // 1. Check contacts table for existing Stripe customer
+    const { data: contact } = await supabaseAdmin
+      .from("contacts")
+      .select("stripe_customer_id")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (contact?.stripe_customer_id) return contact.stripe_customer_id;
+
+    // 2. Create new Stripe customer
+    const customer = await stripe.customers.create({
+      email,
+      metadata: { supabase_user_id: userId },
+    });
+
+    // 3. Upsert into contacts table
+    await supabaseAdmin.from("contacts").upsert(
+      {
+        email,
+        stripe_customer_id: customer.id,
+        user_id: userId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "email" }
+    );
+
+    return customer.id;
+  } catch (err) {
+    console.error("[Customer Resolution] Non-fatal error:", err);
+    // Don't block checkout — Stripe will create an ad-hoc customer
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────
+// Main Handler
+// ──────────────────────────────────────────────────
+
 serve(async (req: Request) => {
-  // Handle CORS preflight explicitly
+  // CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // POST only
+  if (req.method !== "POST") {
+    return json({ code: "METHOD_NOT_ALLOWED", error: "POST only." }, 405);
+  }
+
   try {
-    // ──────────────────────────────────────────────────
-    // 1. PARSE REQUEST BODY
-    // ──────────────────────────────────────────────────
-    const body: CheckoutRequest = await req.json();
+    // ── 1. Parse body ──
+    const body = await req.json();
+    const rawProductKey: string | undefined = body.productKey || body.product_key;
 
-    console.log("[create-checkout-session] Incoming request:", {
-      priceId: body.priceId || body.price_id || body.stripe_price_id,
-      productKey: body.productKey || body.product_key,
-      mode: body.mode,
-      guestCheckout: body.guestCheckout,
-    });
-
-    // ──────────────────────────────────────────────────
-    // 2. RESOLVE PRODUCT CONFIG
-    // ──────────────────────────────────────────────────
-    const productConfig = resolveProductConfig(body);
-
-    if (!productConfig || !productConfig.stripePriceId) {
-      return new Response(JSON.stringify({
-        error: "Missing required metadata: stripe_price_id or product_key",
-        code: "bad_request",
-        message: "Missing required metadata: stripe_price_id or product_key",
-      }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { stripePriceId, mode, productKey } = productConfig;
-
-    console.log("[create-checkout-session] Resolved product config:", {
-      stripePriceId,
-      mode,
-      productKey,
-    });
-
-    if (!Deno.env.get("STRIPE_SECRET_KEY")) {
-      return new Response(JSON.stringify({
-        error: "Backend Configuration Error",
-        code: "server_configuration_error",
-        message: "Missing STRIPE_SECRET_KEY",
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // ──────────────────────────────────────────────────
-    // 3. DETERMINE AUTH MODE
-    //    - Credit packs always require authentication
-    //    - guestCheckout === true → skip JWT, proceed as guest
-    //    - Otherwise → validate JWT strictly, 401 on failure
-    // ──────────────────────────────────────────────────
-    const authHeader = req.headers.get("Authorization");
-    let user = null;
-    let isGuestCheckout = body.guestCheckout === true;
-
-    // Credit packs must always be authenticated
-    if (AUTHENTICATED_ONLY_KEYS.has(productKey)) {
-      isGuestCheckout = false;
-    }
-
-    if (!isGuestCheckout) {
-      // Authenticated path: require valid JWT
-      const supabaseClient = createClient(
-        Deno.env.get("SUPABASE_URL") ?? "",
-        Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-        {
-          auth: { persistSession: false },
-          global: { headers: { Authorization: authHeader! } },
-        }
+    if (!rawProductKey || typeof rawProductKey !== "string") {
+      return json(
+        { code: "UNKNOWN_PRODUCT", error: "Unknown checkout product." },
+        400
       );
+    }
 
-      const { data: { user: authUser }, error: userError } = await supabaseClient.auth.getUser();
+    // ── 2. Normalize alias ──
+    const productKey = ALIASES[rawProductKey.trim().toLowerCase()] || rawProductKey.trim().toLowerCase();
 
-      if (userError || !authUser) {
-        // Invalid JWT → hard 401
-        return new Response(JSON.stringify({
-          error: "Unauthorized access or missing valid JWT token",
-          code: "unauthorized",
-          message: "Unauthorized access or missing valid JWT token",
-          details: userError,
-        }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+    // ── 3. Look up product config ──
+    const config = PRODUCT_MAP[productKey];
+    if (!config) {
+      return json(
+        { code: "UNKNOWN_PRODUCT", error: "Unknown checkout product." },
+        400
+      );
+    }
+
+    // ── 4. Read Stripe price ID from secret ──
+    const priceId = Deno.env.get(config.envKey);
+    if (!priceId) {
+      console.error(
+        `[Checkout] Missing secret ${config.envKey} for product ${productKey}`
+      );
+      return json(
+        {
+          code: "PRICE_NOT_CONFIGURED",
+          error: "Stripe price is not configured for this product.",
+        },
+        500
+      );
+    }
+
+    // ── 5. Auth resolution ──
+    const authHeader = req.headers.get("Authorization");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    let userId: string | null = null;
+    let userEmail: string | null = null;
+
+    // Determine if the token is a real user JWT (not just the anon key)
+    const token = authHeader?.replace("Bearer ", "");
+    const isRealToken = token && token !== anonKey && token.length > 40;
+
+    if (config.requiresAuth) {
+      // Credit packs: require valid auth
+      if (!isRealToken) {
+        return json(
+          {
+            code: "AUTH_REQUIRED",
+            error:
+              "Authentication is required for credit pack purchases. Please sign in.",
+          },
+          401
+        );
       }
 
-      user = authUser;
+      const supabaseAuth = createClient(
+        Deno.env.get("SUPABASE_URL") ?? "",
+        anonKey,
+        { auth: { persistSession: false } }
+      );
+      const {
+        data: { user },
+        error: authErr,
+      } = await supabaseAuth.auth.getUser(token);
+
+      if (authErr || !user) {
+        return json(
+          {
+            code: "AUTH_REQUIRED",
+            error: "Invalid or expired authentication token.",
+          },
+          401
+        );
+      }
+
+      userId = user.id;
+      userEmail = user.email ?? null;
+    } else {
+      // Public products: auth is optional
+      if (isRealToken) {
+        try {
+          const supabaseAuth = createClient(
+            Deno.env.get("SUPABASE_URL") ?? "",
+            anonKey,
+            { auth: { persistSession: false } }
+          );
+          const {
+            data: { user },
+          } = await supabaseAuth.auth.getUser(token);
+
+          if (user) {
+            userId = user.id;
+            userEmail = user.email ?? null;
+          }
+        } catch {
+          // Non-fatal: proceed as guest
+          console.warn("[Checkout] Optional auth validation failed, continuing as guest.");
+        }
+      }
     }
 
-    // 4. Initialize Service Role Client for administrative lookups
+    // ── 6. Account status guard (authenticated only) ──
     const supabaseAdmin = createClient(
-        Deno.env.get("SUPABASE_URL") ?? "",
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    // 5. Resolve product metadata from DB for session params
-    const { data: product } = await supabaseAdmin.from('products').select('id, name, product_key').eq('stripe_price_id', stripePriceId).maybeSingle();
-    const resolvedProductKey = product?.product_key || productKey;
-
-    // Determine success type from product
-    let successType = 'byok';
-    const productType = (resolvedProductKey || '').toLowerCase();
-    if (productType.includes('starter') || productType.includes('pro')) successType = 'hosted';
-    else if (productType.includes('updates') || productType.includes('support')) successType = 'renewal';
-    else if (productType.includes('credit')) successType = 'topup';
-
-    // Resolve success/cancel URLs
-    const successUrl = body.successUrl || body.return_url;
-    const cancelUrl = body.cancelUrl;
-
-    // ──────────────────────────────────────────────────
-    // AUTHENTICATED CHECKOUT PATH
-    // ──────────────────────────────────────────────────
-    if (!isGuestCheckout && user) {
-      // 5a. Account Status Guard (block paused/canceled accounts)
-      const { data: profileCheck } = await supabaseAdmin.from('profiles').select('account_status').eq('id', user.id).maybeSingle();
-      if (profileCheck && profileCheck.account_status !== 'active') {
-        return new Response(JSON.stringify({
-          error: "Your account is not currently eligible for checkout. Please contact support.",
-          code: "account_blocked",
-          message: "Your account is not currently eligible for checkout. Please contact support.",
-        }), {
-          status: 403,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      // 5b. Backend Duplicate Guard (authenticated only)
-      if (product) {
-        const { data: activeLicenses } = await supabaseAdmin.from('licenses')
-            .select('*, products ( name, product_key )')
-            .eq('user_id', user.id)
-            .ilike('status', 'active');
-            
-        const { data: activeSubs } = await supabaseAdmin.from('subscriptions')
-            .select('id, metadata').eq('user_id', user.id).ilike('status', 'active');
-            
-        const dupProductKey = product.product_key || product.metadata?.product_key || '';
-        
-        let blockReason = null;
-        let errorMessage = `You already own an active license or subscription for ${product.name || 'this product'}.`;
-
-        // Check 1: Exact Match (Subscription)
-        if (activeSubs?.some(s => s.metadata?.stripe_price_id === stripePriceId)) {
-            blockReason = "exact_subscription_exists";
-        }
-        
-        // Check 2: Exact Match (License)
-        if (!blockReason && activeLicenses?.some((l: any) => {
-            const pName = product.name || '';
-            const ownedName = (l.license_name || l.products?.name || '').toLowerCase().trim();
-            const targetName = pName.toLowerCase().trim();
-            return l.product_id === product.id || 
-                   l.stripe_price_id === stripePriceId ||
-                   (ownedName && targetName && ownedName === targetName);
-        })) {
-            blockReason = "exact_license_exists";
-        }
-
-        // Check 3: Cross-tier Blocks
-        if (!blockReason) {
-            if (dupProductKey === 'indie_desktop_byok') {
-                if (activeLicenses?.some((l: any) => l.products?.product_key === 'agency_desktop_byok')) {
-                    blockReason = "higher_tier_owned";
-                    errorMessage = "You already own the Agency Commercial tier, which includes all Indie features.";
-                }
-            } else if (dupProductKey === 'starter') {
-                const hasPro = activeSubs?.some(s => s.metadata?.product_key === 'pro' || s.metadata?.stripe_price_id !== stripePriceId);
-                if (activeSubs && activeSubs.length > 0 && hasPro) {
-                    blockReason = "higher_tier_owned";
-                    errorMessage = "You already have an active Pro subscription.";
-                }
-            }
-        }
-
-        // Check 4: Renewal Prerequisites
-        if (!blockReason && (dupProductKey.includes('updates') || dupProductKey.includes('support'))) {
-            const isIndieRenewal = dupProductKey.includes('indie');
-            const isAgencyRenewal = dupProductKey.includes('agency');
-            
-            const ownsIndie = activeLicenses?.some((l: any) => l.products?.product_key === 'indie_desktop_byok');
-            const ownsAgency = activeLicenses?.some((l: any) => l.products?.product_key === 'agency_desktop_byok');
-            
-            if (isIndieRenewal && !ownsIndie) {
-                blockReason = "missing_base_license";
-                errorMessage = "You must own the Indie Desktop BYOK license to purchase this renewal.";
-            } else if (isAgencyRenewal && !ownsAgency) {
-                blockReason = "missing_base_license";
-                errorMessage = "You must own the Agency Commercial BYOK license to purchase this renewal.";
-            }
-        }
-
-        if (blockReason && body.allowDuplicatePurchase !== true) {
-            console.log(`[create-checkout-session] Blocking duplicate purchase for user ${user.id}:`, {
-              blockReason,
-              productKey: resolvedProductKey,
-              productName: product.name,
-              priceId: stripePriceId,
-            });
-            return new Response(JSON.stringify({ 
-                error: "duplicate_purchase",
-                code: "duplicate_purchase",
-                message: errorMessage,
-                productKey: resolvedProductKey,
-                productName: product.name,
-                reason: blockReason
-            }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-      }
-
-      // 6. Stripe Customer Resolution (authenticated)
-      const { data: contact } = await supabaseAdmin
-        .from("contacts")
-        .select("stripe_customer_id")
-        .eq("email", user.email)
+    if (userId) {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("account_status")
+        .eq("id", userId)
         .maybeSingle();
 
-      let customerId = contact?.stripe_customer_id;
-
-      if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: user.email,
-          metadata: { supabase_user_id: user.id },
-        });
-        customerId = customer.id;
-        
-        await supabaseAdmin.from("contacts").upsert({
-          email: user.email,
-          stripe_customer_id: customerId,
-          user_id: user.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'email' });
-      }
-
-      // 7. Create Authenticated Stripe Checkout Session
-      const sessionMetadata = {
-        user_id: user.id,
-        checkout_mode: "authenticated",
-        product_key: resolvedProductKey,
-        price_id: stripePriceId,
-        success_type: successType,
-      };
-
-      const sessionParams: any = {
-        customer: customerId,
-        line_items: [{ price: stripePriceId, quantity: 1 }],
-        mode: mode,
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        client_reference_id: user.id,
-        metadata: sessionMetadata,
-      };
-
-      // Mode-specific metadata propagation
-      if (mode === 'subscription') {
-        sessionParams.subscription_data = {
-          metadata: { user_id: user.id, product_key: resolvedProductKey },
-        };
-      } else if (mode === 'payment') {
-        sessionParams.payment_intent_data = {
-          metadata: { user_id: user.id, product_key: resolvedProductKey },
-        };
-      }
-
-      console.log("[create-checkout-session] Creating authenticated Stripe session:", {
-        mode,
-        productKey: resolvedProductKey,
-        priceId: stripePriceId,
-        customerId,
-        userId: user.id,
-      });
-
-      try {
-        const session = await stripe.checkout.sessions.create(sessionParams);
-
-        return new Response(JSON.stringify({ url: session.url }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      } catch (stripeErr: any) {
-        console.error("[create-checkout-session] Stripe checkout creation failed:", stripeErr);
-
-        const stripeCode = stripeErr.code || stripeErr.raw?.code || "unknown";
-        const stripeMessage = stripeErr.message || stripeErr.raw?.message || "Stripe checkout session creation failed";
-
-        return new Response(JSON.stringify({
-          error: "Stripe checkout session creation failed",
-          code: "STRIPE_CHECKOUT_FAILED",
-          stripeCode,
-          stripeMessage,
-          productKey: resolvedProductKey,
-          mode,
-        }), {
-          status: stripeErr.statusCode || 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      if (profile && profile.account_status !== "active") {
+        return json(
+          {
+            code: "ACCOUNT_BLOCKED",
+            error:
+              "Your account is not currently eligible for checkout. Please contact support.",
+          },
+          403
+        );
       }
     }
 
-    // ──────────────────────────────────────────────────
-    // GUEST CHECKOUT PATH
-    // ──────────────────────────────────────────────────
-    const guestMetadata = {
-      checkout_mode: "guest",
-      product_key: resolvedProductKey,
-      price_id: stripePriceId,
-      success_type: successType,
+    // ── 7. Duplicate purchase guard (authenticated + non-repeatable only) ──
+    if (userId) {
+      const dupReason = await checkDuplicatePurchase(
+        supabaseAdmin,
+        userId,
+        productKey,
+        priceId
+      );
+      if (dupReason) {
+        console.log(
+          `[Checkout] Duplicate blocked: user=${userId}, product=${productKey}, reason=${dupReason}`
+        );
+        return json(
+          {
+            code: "DUPLICATE_PURCHASE",
+            error: "You already have access to this product.",
+          },
+          409
+        );
+      }
+    }
+
+    // ── 8. Stripe customer resolution (authenticated only) ──
+    let customerId: string | null = null;
+    if (userId && userEmail) {
+      customerId = await resolveStripeCustomer(
+        supabaseAdmin,
+        userId,
+        userEmail
+      );
+    }
+
+    // ── 9. Build metadata ──
+    const metadata: Record<string, string> = {
+      product_key: productKey,
+      purchase_kind: config.purchase_kind,
+      source: "checkout_session",
+    };
+    if (userId) metadata.user_id = userId;
+    if (userEmail) metadata.email = userEmail;
+    if (config.credits) metadata.credits = String(config.credits);
+    if (config.monthly_credits)
+      metadata.monthly_credits = String(config.monthly_credits);
+
+    // ── 10. Build Stripe Checkout Session params ──
+    const success_url =
+      body.successUrl ||
+      body.success_url ||
+      `${Deno.env.get("SITE_URL") || "https://castdirectorstudio.com"}/get-started#session_id={CHECKOUT_SESSION_ID}`;
+    const cancel_url =
+      body.cancelUrl ||
+      body.cancel_url ||
+      `${Deno.env.get("SITE_URL") || "https://castdirectorstudio.com"}/#pricing`;
+
+    const sessionParams: any = {
+      mode: config.mode,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url,
+      cancel_url,
+      allow_promotion_codes: true,
+      metadata,
     };
 
-    const guestSessionParams: any = {
-      // No customer pre-set — Stripe collects email natively
-      line_items: [{ price: stripePriceId, quantity: 1 }],
-      mode: mode,
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata: guestMetadata,
-    };
+    // Attach customer if resolved
+    if (customerId) {
+      sessionParams.customer = customerId;
+    }
+
+    // Client reference for webhook identity resolution
+    if (userId) {
+      sessionParams.client_reference_id = userId;
+    }
 
     // Mode-specific metadata propagation
-    if (mode === 'subscription') {
-      guestSessionParams.subscription_data = {
-        metadata: {
-          checkout_mode: "guest",
-          product_key: resolvedProductKey,
-        },
-      };
-    } else if (mode === 'payment') {
-      guestSessionParams.payment_intent_data = {
-        metadata: {
-          checkout_mode: "guest",
-          product_key: resolvedProductKey,
-        },
-      };
+    if (config.mode === "payment") {
+      sessionParams.payment_intent_data = { metadata };
+    }
+    if (config.mode === "subscription") {
+      sessionParams.subscription_data = { metadata };
     }
 
-    console.log("[create-checkout-session] Creating guest Stripe session:", {
-      mode,
-      productKey: resolvedProductKey,
-      priceId: stripePriceId,
+    // ── 11. Safe logging ──
+    console.log("[Checkout] Creating session:", {
+      productKey,
+      mode: config.mode,
+      purchaseKind: config.purchase_kind,
+      allowPromotionCodes: true,
+      pricePrefix: priceId.slice(0, 12),
+      hasUserId: Boolean(userId),
     });
 
-    try {
-      const session = await stripe.checkout.sessions.create(guestSessionParams);
+    // ── 12. Create Stripe Checkout Session ──
+    const session = await stripe.checkout.sessions.create(sessionParams);
 
-      return new Response(JSON.stringify({ url: session.url }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    } catch (stripeErr: any) {
-      console.error("[create-checkout-session] Stripe guest checkout creation failed:", stripeErr);
+    return json({
+      url: session.url,
+      checkout_url: session.url,
+      session_id: session.id,
+    });
+  } catch (err: any) {
+    // Stripe-specific errors
+    if (err.type?.startsWith("Stripe") || err.raw) {
+      const stripeCode = err.code || err.raw?.code || "unknown";
+      const stripeMessage =
+        err.message ||
+        err.raw?.message ||
+        "Stripe checkout session creation failed";
+      const stripeParam = err.param || err.raw?.param || null;
 
-      const stripeCode = stripeErr.code || stripeErr.raw?.code || "unknown";
-      const stripeMessage = stripeErr.message || stripeErr.raw?.message || "Stripe checkout session creation failed";
+      // Extract productKey from the request if possible
+      let productKey = "unknown";
+      let mode = "unknown";
+      try {
+        // Can't re-read body, but we can extract from error context
+        productKey = err._productKey || "unknown";
+        mode = err._mode || "unknown";
+      } catch {}
 
-      return new Response(JSON.stringify({
-        error: "Stripe checkout session creation failed",
-        code: "STRIPE_CHECKOUT_FAILED",
+      console.error("[Checkout] Stripe error:", {
         stripeCode,
         stripeMessage,
-        productKey: resolvedProductKey,
-        mode,
-      }), {
-        status: stripeErr.statusCode || 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        stripeParam,
       });
+
+      return json(
+        {
+          code: "STRIPE_CHECKOUT_FAILED",
+          error: "Stripe checkout session creation failed",
+          stripeCode,
+          stripeMessage,
+          stripeParam,
+          productKey,
+          mode,
+        },
+        err.statusCode || 500
+      );
     }
 
-  } catch (err: any) {
-    if (err.raw?.statusCode === 401 || err.statusCode === 401 || err.type === "StripeAuthenticationError") {
-       console.error("CRITICAL: Stripe API rejected the backend request! 401 Unauthorized.");
-       return new Response(JSON.stringify({ error: "Stripe API Error", code: "stripe_auth_error", message: "Stripe API Key Invalid or Missing Permissions" }), {
-         status: 500,
-         headers: { ...corsHeaders, "Content-Type": "application/json" },
-       });
+    // Stripe auth error (bad API key)
+    if (
+      err.raw?.statusCode === 401 ||
+      err.statusCode === 401 ||
+      err.type === "StripeAuthenticationError"
+    ) {
+      console.error("CRITICAL: Stripe API rejected the backend request!");
+      return json(
+        {
+          code: "STRIPE_AUTH_ERROR",
+          error: "Stripe API key invalid or missing permissions.",
+        },
+        500
+      );
     }
 
-    console.error("[create-checkout-session] Internal Edge Function Error:", err);
-    return new Response(JSON.stringify({ error: "Internal Server Error", code: "internal_error", message: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error("[Checkout] Internal error:", err);
+    return json(
+      { code: "INTERNAL_ERROR", error: "Internal server error." },
+      500
+    );
   }
 });

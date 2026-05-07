@@ -15,16 +15,29 @@ const CustomerDetailAdmin: React.FC = () => {
   const [isAdjustCreditsOpen, setIsAdjustCreditsOpen] = useState(false);
   const [adjustAmount, setAdjustAmount] = useState<string>('');
   const [adjustReason, setAdjustReason] = useState<string>('');
+  const [adjustInternalNote, setAdjustInternalNote] = useState<string>('');
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [adjustError, setAdjustError] = useState<string | null>(null);
+  const [adjustResult, setAdjustResult] = useState<string | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [licenses, setLicenses] = useState<any[]>([]);
   const [downloads, setDownloads] = useState<any[]>([]);
   const [emails, setEmails] = useState<any[]>([]);
+  const [creditTransactions, setCreditTransactions] = useState<any[]>([]);
   const [missingSchema, setMissingSchema] = useState<string[]>([]);
 
   const [resendingState, setResendingState] = useState<{ [key: string]: boolean }>({});
+
+  const [licenseModalState, setLicenseModalState] = useState<{
+    isOpen: boolean;
+    action: 'deactivate' | 'reactivate' | 'refund' | 'swap' | null;
+    license: any | null;
+    reason: string;
+    internalNote: string;
+    isSubmitting: boolean;
+    error: string | null;
+  }>({ isOpen: false, action: null, license: null, reason: '', internalNote: '', isSubmitting: false, error: null });
 
   const [isForceClaimOpen, setIsForceClaimOpen] = useState(false);
   const [isForceClaiming, setIsForceClaiming] = useState(false);
@@ -97,6 +110,54 @@ const CustomerDetailAdmin: React.FC = () => {
       setStatusUpdateError(e.message || 'Failed to update account status');
     } finally {
       setIsUpdatingStatus(false);
+    }
+  };
+
+  const openLicenseModal = (action: 'deactivate' | 'reactivate' | 'refund' | 'swap', license: any) => {
+    setLicenseModalState({
+      isOpen: true,
+      action,
+      license,
+      reason: '',
+      internalNote: '',
+      isSubmitting: false,
+      error: null
+    });
+  };
+
+  const handleLicenseAction = async () => {
+    const { action, license, reason, internalNote } = licenseModalState;
+    if (!action || !license) return;
+
+    if (!reason.trim()) {
+      setLicenseModalState(s => ({ ...s, error: 'Reason is required.' }));
+      return;
+    }
+
+    setLicenseModalState(s => ({ ...s, isSubmitting: true, error: null }));
+
+    try {
+      let rpcName = '';
+      if (action === 'deactivate') rpcName = 'admin_deactivate_license';
+      if (action === 'reactivate') rpcName = 'admin_reactivate_license';
+      if (action === 'refund') rpcName = 'admin_mark_license_refunded';
+      if (action === 'swap') rpcName = 'admin_mark_license_swapped';
+
+      const { data, error } = await supabase.rpc(rpcName, {
+        p_license_id: license.id,
+        p_reason: reason.trim(),
+        p_internal_note: internalNote.trim() || null
+      });
+
+      if (error) throw new Error(error.message);
+
+      setLicenses(prev => prev.map(l => l.id === license.id ? { ...l, status: data.new_status } : l));
+      setLicenseModalState(s => ({ ...s, isOpen: false, isSubmitting: false }));
+      
+      setAdjustResult(`License successfully marked as ${data.new_status}.`);
+      setTimeout(() => setAdjustResult(null), 8000);
+    } catch (err: any) {
+      setLicenseModalState(s => ({ ...s, isSubmitting: false, error: err.message || 'Action failed' }));
     }
   };
 
@@ -236,6 +297,13 @@ const CustomerDetailAdmin: React.FC = () => {
              if (profileData) setCreditBalance(profileData.credit_balance);
            } catch(e) {
              warnings.push("profiles.credit_balance");
+           }
+
+           try {
+             const { data: ctData } = await supabase.from('credit_transactions').select('*').eq('user_id', resolvedUserId).order('created_at', { ascending: false });
+             if (ctData) setCreditTransactions(ctData);
+           } catch(e) {
+             warnings.push("credit_transactions");
            }
 
            // Fetch account status separately — columns may not exist if migration hasn't run yet
@@ -540,51 +608,52 @@ const CustomerDetailAdmin: React.FC = () => {
       setAdjustError("Amount must be a valid integer.");
       return;
     }
+    if (amountNum === 0) {
+      setAdjustError("Adjustment amount cannot be zero.");
+      return;
+    }
     if (!adjustReason.trim()) {
-      setAdjustError("Reason is required.");
+      setAdjustError("A reason is required.");
       return;
     }
     if (creditBalance !== null && creditBalance + amountNum < 0) {
-      setAdjustError("Adjustment would result in a negative balance.");
+      setAdjustError("This adjustment would make the customer's balance negative.");
       return;
     }
 
     setIsAdjusting(true);
     setAdjustError(null);
+    setAdjustResult(null);
 
-    const normalizedEmail = contact.email?.trim().toLowerCase();
     const reason = adjustReason.trim();
-
-    // Dev-only diagnostics
-    console.log("[Adjust Credits] email:", normalizedEmail);
-    console.log("[Adjust Credits] amountNum:", amountNum, "type:", typeof amountNum);
-    console.log("[Adjust Credits] reason present:", !!reason);
-    console.log("[Adjust Credits] contact.user_id:", contact.user_id);
-    console.log("[Adjust Credits] current creditBalance:", creditBalance);
+    const internalNote = adjustInternalNote.trim();
 
     try {
-      const { data, error: rpcErr } = await supabase.rpc('admin_add_credits', {
-        p_contact_email: normalizedEmail,
+      const { data, error: rpcErr } = await supabase.rpc('admin_adjust_user_credits', {
+        p_user_id: contact.user_id,
         p_amount: amountNum,
         p_reason: reason,
+        p_internal_note: internalNote || null
       });
 
       if (rpcErr) {
-        console.error("[Adjust Credits] RPC Error:", {
-          message: rpcErr.message,
-          code: rpcErr.code,
-          details: rpcErr.details,
-          hint: rpcErr.hint,
-        });
         throw new Error(rpcErr.message);
       }
 
-      console.log("[Adjust Credits] RPC success, new balance:", data);
+      setCreditBalance(data.balance_after);
+      
+      // Refresh credit transactions
+      const { data: ctData } = await supabase.from('credit_transactions').select('*').eq('user_id', contact.user_id).order('created_at', { ascending: false });
+      if (ctData) setCreditTransactions(ctData);
 
-      setCreditBalance(data as number);
+      setAdjustResult(`Credit balance updated. Previous balance: ${data.balance_before}. Adjustment: ${data.adjustment}. New balance: ${data.balance_after}.`);
+      
       setIsAdjustCreditsOpen(false);
       setAdjustAmount('');
       setAdjustReason('');
+      setAdjustInternalNote('');
+      
+      setTimeout(() => setAdjustResult(null), 8000);
     } catch (e: any) {
       setAdjustError(e.message || "Failed to adjust credits");
     } finally {
@@ -658,7 +727,9 @@ const CustomerDetailAdmin: React.FC = () => {
           )}
           <button
             onClick={() => setIsAdjustCreditsOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-black border border-nano-border text-white font-bold text-xs uppercase tracking-wider rounded-md hover:bg-white/5 transition-colors"
+            disabled={!contact?.user_id}
+            className="flex items-center gap-2 px-4 py-2 bg-black border border-nano-border text-white font-bold text-xs uppercase tracking-wider rounded-md hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={!contact?.user_id ? "Account not claimed yet" : ""}
           >
             <Coins size={14} className="text-nano-yellow" /> Adjust Credits
           </button>
@@ -674,6 +745,12 @@ const CustomerDetailAdmin: React.FC = () => {
       {sendResetResult && (
         <div className="bg-green-500/10 border border-green-500/30 text-green-400 p-4 rounded mb-8 font-mono text-xs font-bold">
           {sendResetResult}
+        </div>
+      )}
+
+      {adjustResult && (
+        <div className="bg-green-500/10 border border-green-500/30 text-green-400 p-4 rounded mb-8 font-mono text-xs font-bold">
+          {adjustResult}
         </div>
       )}
 
@@ -801,9 +878,21 @@ const CustomerDetailAdmin: React.FC = () => {
            ))}
         </div>
         <div>
-           {renderRichTable("Licenses", licenses, licenseColumns)}
+           {renderRichTable("Licenses", licenses, licenseColumns, (row) => (
+              <div className="flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity items-end">
+                {row.status === 'active' && <button onClick={() => openLicenseModal('deactivate', row)} className="px-2 py-0.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] uppercase font-bold rounded hover:bg-red-500/20">Deactivate</button>}
+                {(row.status === 'inactive' || row.status === 'revoked' || row.status === 'refunded' || row.status === 'swapped') && <button onClick={() => openLicenseModal('reactivate', row)} className="px-2 py-0.5 bg-green-500/10 border border-green-500/20 text-green-400 text-[9px] uppercase font-bold rounded hover:bg-green-500/20">Reactivate</button>}
+                {row.status !== 'refunded' && <button onClick={() => openLicenseModal('refund', row)} className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] uppercase font-bold rounded hover:bg-amber-500/20">Mark Refunded</button>}
+                {row.status !== 'swapped' && <button onClick={() => openLicenseModal('swap', row)} className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] uppercase font-bold rounded hover:bg-blue-500/20">Swap</button>}
+              </div>
+           ))}
            {renderRichTable("Downloads", downloads, downloadColumns)}
            {renderRichTable("Email Sends", emails, emailColumns)}
+           {renderRichTable("Credit History", creditTransactions, [
+              { header: 'Kind', render: (row: any) => <div><div className="text-white font-mono text-[10px]">{row.kind}</div><div className="text-[10px] text-gray-500 mt-0.5">{row.created_at ? new Date(row.created_at).toLocaleString() : 'Unknown'}</div></div> },
+              { header: 'Amount', render: (row: any) => <div><div className={`font-mono text-[12px] font-bold ${row.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{row.amount > 0 ? '+' : ''}{row.amount}</div><div className="text-[10px] text-gray-500 mt-0.5">{row.balance_before} → {row.balance_after}</div></div> },
+              { header: 'Reason & Note', render: (row: any) => <div><div className="text-white text-xs">{row.reason}</div>{row.metadata?.internal_note && <div className="text-[10px] text-amber-400 mt-0.5 italic">Note: {row.metadata.internal_note}</div>}</div> }
+           ])}
         </div>
       </div>
 
@@ -891,7 +980,7 @@ const CustomerDetailAdmin: React.FC = () => {
           <div className="bg-nano-bg border border-nano-border w-full max-w-md rounded-xl shadow-2xl overflow-hidden flex flex-col">
             <div className="flex justify-between items-center px-6 py-4 border-b border-nano-border bg-black/40">
               <h3 className="font-mono font-bold tracking-wide flex items-center gap-2">
-                <Coins size={16} className="text-nano-yellow" /> Adjust Credits
+                <Coins size={16} className="text-nano-yellow" /> Admin Credit Adjustment
               </h3>
               <button 
                 onClick={() => !isAdjusting && setIsAdjustCreditsOpen(false)}
@@ -903,11 +992,27 @@ const CustomerDetailAdmin: React.FC = () => {
             </div>
             
             <div className="p-6 flex-1 overflow-y-auto space-y-4 font-mono text-sm">
-              <div className="grid grid-cols-[100px_1fr] items-center gap-2">
-                <span className="text-gray-500 text-xs uppercase">Current:</span>
-                <span className="text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/20 py-1.5 px-3 rounded font-bold">
-                  {creditBalance !== null ? creditBalance : 'Unclaimed Account'}
-                </span>
+              <p className="text-[10px] text-gray-400 font-sans leading-relaxed mb-2">
+                Manually add or deduct credits from this customer’s account. Every adjustment is recorded in the credit transaction history.
+              </p>
+
+              <div className="grid grid-cols-3 gap-2 bg-black/30 border border-nano-border p-3 rounded items-center text-center">
+                <div>
+                  <div className="text-[10px] text-gray-500 uppercase">Before</div>
+                  <div className="text-white font-bold">{creditBalance !== null ? creditBalance : '--'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-gray-500 uppercase">Adjustment</div>
+                  <div className={`font-bold ${parseInt(adjustAmount || '0') > 0 ? 'text-green-400' : parseInt(adjustAmount || '0') < 0 ? 'text-red-400' : 'text-gray-500'}`}>
+                    {parseInt(adjustAmount || '0') > 0 ? '+' : ''}{parseInt(adjustAmount || '0')}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-gray-500 uppercase">After</div>
+                  <div className={`font-bold ${(creditBalance || 0) + parseInt(adjustAmount || '0') < 0 ? 'text-red-500' : 'text-nano-yellow'}`}>
+                    {creditBalance !== null && !isNaN(parseInt(adjustAmount || '0')) ? creditBalance + parseInt(adjustAmount || '0') : '--'}
+                  </div>
+                </div>
               </div>
 
               <div className="pt-2">
@@ -920,18 +1025,29 @@ const CustomerDetailAdmin: React.FC = () => {
                   disabled={isAdjusting}
                   className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600"
                 />
-                <div className="text-[10px] text-gray-500 mt-1">Use positive numbers to add, negative to remove.</div>
               </div>
 
               <div>
-                <label className="block text-gray-500 text-xs uppercase mb-2">Reason</label>
-                <textarea 
-                  placeholder="Reason for manual adjustment..."
+                <label className="block text-gray-500 text-xs uppercase mb-2">Reason (Required)</label>
+                <input 
+                  type="text"
+                  placeholder="e.g. Refund for failed generation..."
                   value={adjustReason}
                   onChange={e => setAdjustReason(e.target.value)}
                   disabled={isAdjusting}
-                  rows={3}
-                  className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600 resize-none font-sans"
+                  className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600 font-sans"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-gray-500 text-xs uppercase mb-2">Internal Note (Optional)</label>
+                <input 
+                  type="text"
+                  placeholder="Only visible to admins..."
+                  value={adjustInternalNote}
+                  onChange={e => setAdjustInternalNote(e.target.value)}
+                  disabled={isAdjusting}
+                  className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600 font-sans"
                 />
               </div>
 
@@ -952,11 +1068,11 @@ const CustomerDetailAdmin: React.FC = () => {
               </button>
               <button 
                 onClick={handleAdjustCredits}
-                disabled={isAdjusting}
+                disabled={isAdjusting || !adjustAmount || parseInt(adjustAmount) === 0 || !adjustReason.trim() || ((creditBalance || 0) + parseInt(adjustAmount || '0') < 0)}
                 className="px-6 py-2 bg-nano-yellow text-black rounded text-xs uppercase tracking-wider font-bold hover:bg-yellow-400 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
                 {isAdjusting ? <Loader2 size={16} className="animate-spin" /> : <Coins size={16} />} 
-                {isAdjusting ? 'Applying...' : 'Apply Adjustment'}
+                {isAdjusting ? 'Applying...' : 'Confirm Credit Adjustment'}
               </button>
             </div>
           </div>
@@ -1124,6 +1240,88 @@ const CustomerDetailAdmin: React.FC = () => {
               >
                 {isUpdatingStatus ? <Loader2 size={16} className="animate-spin" /> : null}
                 {isUpdatingStatus ? 'Updating...' : statusAction === 'paused' ? 'Pause Account' : statusAction === 'canceled' ? 'Cancel Account' : 'Reactivate Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* License Action Modal */}
+      {licenseModalState.isOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-nano-bg border border-nano-border w-full max-w-md rounded-xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-nano-border bg-black/40">
+              <h3 className="font-mono font-bold tracking-wide flex items-center gap-2 capitalize">
+                <ShieldAlert size={16} className="text-nano-yellow" /> {licenseModalState.action?.replace('_', ' ')} License
+              </h3>
+              <button 
+                onClick={() => !licenseModalState.isSubmitting && setLicenseModalState(s => ({ ...s, isOpen: false }))}
+                className="text-gray-400 hover:text-white"
+                disabled={licenseModalState.isSubmitting}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 flex-1 overflow-y-auto space-y-4 font-mono text-sm">
+              <p className="text-[10px] text-gray-400 font-sans leading-relaxed mb-2">
+                Action: <strong className="text-white capitalize">{licenseModalState.action?.replace('_', ' ')}</strong><br/>
+                Product: <strong className="text-white">{licenseModalState.license?._product?.name}</strong><br/>
+                Key: <strong className="text-nano-text select-all">{licenseModalState.license?.license_key || licenseModalState.license?.id?.split('-')[0]}</strong>
+              </p>
+
+              {licenseModalState.action === 'refund' && (
+                <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 p-3 rounded text-[10px] uppercase font-bold tracking-wider mb-4">
+                  ⚠️ This marks the license as refunded inside Cast Director Studio. It does NOT issue a Stripe refund.
+                </div>
+              )}
+
+              <div>
+                <label className="block text-gray-500 text-xs uppercase mb-2">Reason (Required)</label>
+                <input 
+                  type="text"
+                  placeholder="Reason for this status change..."
+                  value={licenseModalState.reason}
+                  onChange={e => setLicenseModalState(s => ({ ...s, reason: e.target.value }))}
+                  disabled={licenseModalState.isSubmitting}
+                  className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600 font-sans"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-gray-500 text-xs uppercase mb-2">Internal Note (Optional)</label>
+                <input 
+                  type="text"
+                  placeholder="Only visible to admins..."
+                  value={licenseModalState.internalNote}
+                  onChange={e => setLicenseModalState(s => ({ ...s, internalNote: e.target.value }))}
+                  disabled={licenseModalState.isSubmitting}
+                  className="w-full bg-black border border-nano-border px-4 py-3 rounded text-white focus:outline-none focus:border-nano-yellow transition-colors placeholder:text-gray-600 font-sans"
+                />
+              </div>
+
+              {licenseModalState.error && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-500 p-3 rounded text-xs">
+                  {licenseModalState.error}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-nano-border bg-black/40 px-6 py-4 flex justify-end gap-3">
+              <button 
+                onClick={() => setLicenseModalState(s => ({ ...s, isOpen: false }))}
+                disabled={licenseModalState.isSubmitting}
+                className="px-4 py-2 border border-nano-border text-gray-300 hover:bg-white/5 rounded text-xs uppercase tracking-wider font-bold transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleLicenseAction}
+                disabled={licenseModalState.isSubmitting || !licenseModalState.reason.trim()}
+                className="px-6 py-2 bg-nano-yellow text-black rounded text-xs uppercase tracking-wider font-bold hover:bg-yellow-400 transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {licenseModalState.isSubmitting ? <Loader2 size={16} className="animate-spin" /> : null} 
+                {licenseModalState.isSubmitting ? 'Applying...' : 'Confirm Action'}
               </button>
             </div>
           </div>

@@ -75,6 +75,7 @@ export async function invokeAuthenticatedFunction<TResponse = any>(
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        apikey: supabaseAnonKey,
       },
       cache: 'no-store',
     };

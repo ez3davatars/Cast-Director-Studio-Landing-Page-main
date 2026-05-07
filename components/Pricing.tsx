@@ -2,17 +2,30 @@ import React, { useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { Check, Loader2 } from 'lucide-react';
 import DuplicatePurchaseModal from './DuplicatePurchaseModal';
-import { getProductByKey, getProductByStripePriceId, resolveCatalogEntryFromDbProduct, resolveDisplayName } from '../lib/products';
+import { getProductByKey, resolveCatalogEntryFromDbProduct, resolveDisplayName } from '../lib/products';
 import { supabase } from '../lib/supabase';
 
 /* ── Fallback prices shown when live pricing data is unavailable ── */
 const FALLBACK_PRICES: Record<string, { displayPrice: string; interval: string; billingSuffix: string }> = {
   starter:                { displayPrice: '$49',  interval: 'month', billingSuffix: '/month' },
+  starter_monthly:        { displayPrice: '$49',  interval: 'month', billingSuffix: '/month' },
   pro:                    { displayPrice: '$99',  interval: 'month', billingSuffix: '/month' },
+  pro_monthly:            { displayPrice: '$99',  interval: 'month', billingSuffix: '/month' },
   indie_desktop_byok:     { displayPrice: '$199', interval: '',      billingSuffix: ' one-time' },
   agency_desktop_byok:    { displayPrice: '$499', interval: '',      billingSuffix: ' one-time' },
+  agency_commercial_byok: { displayPrice: '$499', interval: '',      billingSuffix: ' one-time' },
   indie_updates_support:  { displayPrice: '$99',  interval: 'year',  billingSuffix: '/year' },
   agency_updates_support: { displayPrice: '$249', interval: 'year',  billingSuffix: '/year' },
+};
+
+/* ── Map catalog productKeys → Edge Function canonical keys ──
+   The client catalog uses short names ("starter", "pro"), but the
+   Edge Function PRICE_MAP uses the canonical billing keys.  This map
+   ensures the payload always contains the key the function expects. */
+const CHECKOUT_KEY_MAP: Record<string, string> = {
+  starter:             'starter_monthly',
+  pro:                 'pro_monthly',
+  agency_desktop_byok: 'agency_commercial_byok',
 };
 
 /* ── Authoritative feature lists per plan ──
@@ -210,139 +223,60 @@ const Pricing: React.FC<PricingProps> = ({
   }, []);
 
 
-  const executeCheckout = async (product: any, allowDuplicatePurchase: boolean = false) => {
+  const executeCheckout = async (product: any) => {
     setCheckingOutProductId(product.id);
     setCheckoutError(null);
     setDuplicateWarning(null);
 
     try {
-      const { data: { session: activeSession }, error: authError } = await supabase.auth.getSession();
-      
-      if (!activeSession || !activeSession.access_token || authError) {
-        // Session is stale or missing — fall back to guest checkout instead of blocking
-        console.warn('No valid session for authenticated checkout, falling back to guest checkout.');
-        await executeGuestCheckout(product);
-        return;
-      }
-
-      // Catalog-driven Success Routing
-      let successType = 'byok';
+      // Resolve the canonical productKey for the Edge Function
       const catalogEntry = resolveCatalogEntryFromDbProduct(product);
-      if (catalogEntry) {
-          if (catalogEntry.productType === 'subscription') successType = 'hosted';
-          else if (catalogEntry.productType === 'support_plan') successType = 'renewal';
-          else if (catalogEntry.productType === 'desktop_license') successType = 'byok';
-      }
+      const rawKey = catalogEntry?.productKey || product.product_key || 'unknown';
+      const productKey = CHECKOUT_KEY_MAP[rawKey] || rawKey;
 
-      const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
+      // Credit packs require auth — guard early for better UX
+      const isCreditPack = productKey === 'credit_pack_100' || productKey === 'credit_pack_500';
 
-      // Use raw fetch instead of supabase.functions.invoke for proper error body parsing
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-      const functionUrl = `${supabaseUrl}/functions/v1/create-checkout-session`;
-
-      const response = await fetch(functionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseAnonKey,
-          'Authorization': `Bearer ${activeSession.access_token}`,
-        },
-        body: JSON.stringify({
-          priceId: product.stripe_price_id,
-          mode: catalogEntry?.checkoutMode || 'payment',
-          productKey: catalogEntry?.productKey || product.product_key || 'unknown',
-          successUrl: returnUrl,
-          cancelUrl: `${window.location.origin}/#pricing`,
-          allowDuplicatePurchase,
-        }),
-      });
-
-      let responseBody: any = null;
-      try {
-        responseBody = await response.json();
-      } catch {
-        responseBody = await response.text();
-      }
-
-      if (!response.ok) {
-        console.error('Checkout Edge Function rejected request:', {
-          status: response.status,
-          responseBody,
-          priceId: product.stripe_price_id,
-        });
-
-        // Surface the real server error message
-        const serverMessage = responseBody?.message || responseBody?.error || `Checkout failed with status ${response.status}`;
-
-        if (response.status === 409 && (responseBody?.code === 'duplicate_purchase' || responseBody?.error === 'duplicate_purchase')) {
-          setCheckoutError(serverMessage);
-        } else if (response.status === 401) {
-          // JWT expired or invalid — fall back to guest checkout
-          console.warn('Auth rejected by Edge Function, falling back to guest checkout.');
-          await executeGuestCheckout(product);
-          return;
-        } else {
-          setCheckoutError(serverMessage);
-        }
-
-        throw new Error(serverMessage);
-      }
-
-      if (responseBody?.url) {
-        window.location.href = responseBody.url;
-      } else {
-        console.error('Checkout Edge Function returned no checkout URL:', responseBody);
-        throw new Error('Checkout session was created but no checkout URL was returned.');
-      }
-
-    } catch (err: any) {
-      console.error("Checkout launch failed:", err);
-      if (!checkoutError) {
-        setCheckoutError(err.message || "An unexpected error occurred during checkout initialization.");
-      }
-    } finally {
-      if (!window.location.href.includes('stripe')) setCheckingOutProductId(null);
-    }
-  };
-
-  /* ── Guest Checkout: no auth required ── */
-  const executeGuestCheckout = async (product: any) => {
-    setCheckingOutProductId(product.id);
-    setCheckoutError(null);
-
-    try {
+      // Resolve success routing type
       let successType = 'byok';
-      const catalogEntry = resolveCatalogEntryFromDbProduct(product);
       if (catalogEntry) {
         if (catalogEntry.productType === 'subscription') successType = 'hosted';
         else if (catalogEntry.productType === 'support_plan') successType = 'renewal';
+        else if (catalogEntry.productType === 'credit_topup') successType = 'topup';
         else if (catalogEntry.productType === 'desktop_license') successType = 'byok';
       }
 
-      const successUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
+      const successUrl = `${window.location.origin}/get-started#session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
       const cancelUrl = `${window.location.origin}/#pricing`;
 
-      // Call the Edge Function with anon key as bearer (required by Supabase gateway)
-      // and guestCheckout flag so the function skips JWT user validation
+      // Auth resolution — try to get a valid token, fall back to anon key for guest
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
       const functionUrl = `${supabaseUrl}/functions/v1/create-checkout-session`;
+
+      let bearerToken = supabaseAnonKey; // Default: guest checkout via anon key
+      const { data: { session: activeSession } } = await supabase.auth.getSession();
+      if (activeSession?.access_token) {
+        bearerToken = activeSession.access_token;
+      } else if (isCreditPack) {
+        // Credit packs require auth — server will also reject, but UX is better with client guard
+        setCheckoutError('Please sign in to purchase credit packs.');
+        return;
+      }
+
+      console.log('[Pricing] Checkout →', { productKey, isCreditPack, isGuest: bearerToken === supabaseAnonKey });
 
       const response = await fetch(functionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'apikey': supabaseAnonKey,
-          'Authorization': `Bearer ${supabaseAnonKey}`,
+          'Authorization': `Bearer ${bearerToken}`,
         },
         body: JSON.stringify({
-          priceId: product.stripe_price_id,
-          mode: catalogEntry?.checkoutMode || 'payment',
-          productKey: catalogEntry?.productKey || product.product_key || 'unknown',
+          productKey,
           successUrl,
           cancelUrl,
-          guestCheckout: true,
         }),
       });
 
@@ -354,25 +288,31 @@ const Pricing: React.FC<PricingProps> = ({
       }
 
       if (!response.ok) {
-        console.error('Guest checkout Edge Function rejected request:', {
-          status: response.status,
-          responseBody,
-          priceId: product.stripe_price_id,
-        });
+        console.error('Checkout rejected:', { status: response.status, responseBody, productKey });
 
-        const serverMessage = responseBody?.message || responseBody?.error || `Checkout failed with status ${response.status}`;
-        throw new Error(serverMessage);
+        const serverMessage = responseBody?.error || `Checkout failed with status ${response.status}`;
+
+        // Surface Stripe detail if available
+        const stripeDetail = responseBody?.stripeMessage;
+        const displayMessage = stripeDetail
+          ? `${serverMessage}: ${stripeDetail}`
+          : serverMessage;
+
+        setCheckoutError(displayMessage);
+        throw new Error(displayMessage);
       }
 
       if (responseBody?.url) {
         window.location.href = responseBody.url;
       } else {
-        console.error('Guest checkout returned no checkout URL:', responseBody);
+        console.error('Checkout returned no URL:', responseBody);
         throw new Error('Checkout session was created but no checkout URL was returned.');
       }
     } catch (err: any) {
-      console.error('Guest checkout failed:', err);
-      setCheckoutError(err.message || 'An unexpected error occurred during checkout.');
+      console.error('Checkout failed:', err);
+      if (!checkoutError) {
+        setCheckoutError(err.message || 'An unexpected error occurred during checkout.');
+      }
     } finally {
       if (!window.location.href.includes('stripe')) setCheckingOutProductId(null);
     }
@@ -382,7 +322,7 @@ const Pricing: React.FC<PricingProps> = ({
     if (catalogEntry && catalogEntry.duplicatePolicy !== 'allow') {
         const isSupport = catalogEntry.productType === 'support_plan';
         const { data: licenses } = await supabase.from('licenses')
-            .select('*, products ( name )')
+            .select('*, products ( name, product_key )')
             .eq('user_id', session!.user.id)
             .ilike('status', 'active');
             
@@ -391,18 +331,13 @@ const Pricing: React.FC<PricingProps> = ({
         let hasMatch = false;
         if (licenses) {
             hasMatch = hasMatch || licenses.some((l: any) => {
-                const lEntry = getProductByStripePriceId(l.stripe_price_id) || getProductByKey(l.product_id);
-                const pName = product.name || '';
-                const ownedName = (l.license_name || l.products?.name || '').toLowerCase().trim();
-                const targetName = pName.toLowerCase().trim();
-                
+                const lEntry = getProductByKey(l.products?.product_key) || getProductByKey(l.product_id);
                 return (lEntry && lEntry.productKey === catalogEntry.productKey) || 
-                       l.product_id === product.id ||
-                       (ownedName && targetName && ownedName === targetName);
+                       l.product_id === product.id;
             });
         }
         if (subs && !hasMatch) {
-            hasMatch = hasMatch || subs.some((s: any) => s.status === 'active' && s.metadata?.stripe_price_id === product.stripe_price_id);
+            hasMatch = hasMatch || subs.some((s: any) => s.status === 'active' && s.metadata?.product_key === catalogEntry.productKey);
         }
         
         if (hasMatch) {
@@ -414,35 +349,32 @@ const Pricing: React.FC<PricingProps> = ({
   };
 
   const handleCheckout = async (product: any) => {
-    if (!product.is_active || !product.stripe_price_id) {
-      setCheckoutError("This product is currently unavailable for automated checkout.");
+    if (!product.is_active) {
+      setCheckoutError('This product is currently unavailable for automated checkout.');
       return;
     }
 
-    // Guest checkout: skip pre-check (no user to check against)
+    // Guest checkout: skip pre-check, send directly to Edge Function
     if (!session) {
-      await executeGuestCheckout(product);
+      await executeCheckout(product);
       return;
     }
 
-    // Authenticated checkout: full pre-check + duplicate guard
+    // Authenticated checkout: client-side duplicate pre-check first
     setCheckingOutProductId(product.id);
     setCheckoutError(null);
 
     try {
        const catalogEntry = resolveCatalogEntryFromDbProduct(product);
-       
        const passedPreCheck = await executePreCheck(product, catalogEntry);
        if (!passedPreCheck) {
            setCheckingOutProductId(null);
            return;
        }
-       
-       await executeCheckout(product, false);
-
+       await executeCheckout(product);
     } catch(err: any) {
-       console.error("Pre-checkout check failed", err);
-       setCheckoutError("Pre-checkout check failed: " + (err.message || String(err)));
+       console.error('Pre-checkout check failed', err);
+       setCheckoutError('Pre-checkout check failed: ' + (err.message || String(err)));
        setCheckingOutProductId(null);
     }
   };
@@ -480,7 +412,7 @@ const Pricing: React.FC<PricingProps> = ({
                 isSupport={duplicateWarning.isSupport}
                 onClose={() => setDuplicateWarning(null)}
                 onContinueAnyway={() => {
-                    executeCheckout(duplicateWarning.product, true);
+                    executeCheckout(duplicateWarning.product);
                 }}
             />
         )}

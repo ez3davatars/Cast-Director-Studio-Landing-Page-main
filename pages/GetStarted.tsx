@@ -18,8 +18,9 @@ const GetStarted: React.FC = () => {
   const navigate = useNavigate();
   const { session, openCreateAccount, openSignIn } = useAuth();
 
-  const sessionId = searchParams.get('session_id');
-  const type = searchParams.get('type') || 'byok';
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const sessionId = searchParams.get('session_id') || hashParams.get('session_id');
+  const type = searchParams.get('type') || hashParams.get('type') || 'byok';
 
   const [isClaiming, setIsClaiming] = useState(false);
   const [claimComplete, setClaimComplete] = useState(false);

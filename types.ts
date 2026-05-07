@@ -30,6 +30,7 @@ export type OrderViewModel = {
   paymentStatus: 'Paid' | 'Pending' | 'Failed' | 'Refunded' | string
   deliveryStatus: 'Fulfilled' | 'Pending' | 'Canceled' | string
   purchaseDate: string
+  licenseStatus?: string
 }
 
 export type LicenseViewModel = {
@@ -43,16 +44,15 @@ export type LicenseViewModel = {
   entitlements?: string[]
 }
 
-export type DownloadViewModel = {
-  id: string
-  productName: string
-  platform: 'Windows' | 'Mac' | 'Linux' | string
-  version: string
-  fileType: string
-  expiresAt?: string
-  downloadUrl?: string
-  canGenerateNewLink: boolean
-  isAvailable: boolean
+export interface DownloadViewModel {
+    id: string;
+    productName: string;
+    platform: string;
+    version: string;
+    fileType: string;
+    expiresAt?: string;
+    canGenerateNewLink: boolean;
+    isAvailable: boolean;
 }
 
 export type DownloadTokenRecord = {

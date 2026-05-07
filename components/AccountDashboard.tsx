@@ -50,6 +50,9 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     const [topUpError, setTopUpError] = useState<string | null>(null);
     const [subError, setSubError] = useState<string | null>(null);
 
+    // Download state
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
     // Billing Portal state
     const [portalLoading, setPortalLoading] = useState(false);
     const [portalError, setPortalError] = useState<string | null>(null);
@@ -92,6 +95,26 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         starterExpiration: Date | null;
         proExpiration: Date | null;
     } | null>(null);
+
+    const handleDownloadInstaller = async (downloadId: string) => {
+        try {
+            setDownloadingId(downloadId);
+            const { data, error } = await invokeAuthenticatedFunction('generate-download', { download_id: downloadId });
+            
+            if (error || !data || !data.url) {
+                console.error("Download generation failed:", error || data?.error);
+                alert(`Failed to generate download: ${data?.message || data?.error || 'Unknown error'}`);
+                return;
+            }
+
+            window.location.href = data.url;
+        } catch (err) {
+            console.error("Unexpected error during download:", err);
+            alert("An unexpected error occurred while generating your download.");
+        } finally {
+            setDownloadingId(null);
+        }
+    };
 
     const isExpiringOrExpired = (date: Date | null): boolean => {
         if (!date) return false;
@@ -234,6 +257,10 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const mappedOrders: OrderViewModel[] = [];
             fetchedOrders.forEach((o: any) => {
                 const items = o.order_items || [];
+                // Find license status associated with this order
+                const relatedLicense = fetchedLicenses.find((l: any) => l.order_id === o.id);
+                const orderLicenseStatus = relatedLicense?.status || undefined;
+
                 if (items.length === 0) {
                     mappedOrders.push({
                         orderNumber: o.order_number || o.id?.substring(0, 8) || 'Unknown',
@@ -241,7 +268,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                         amountFormatted: o.total_amount != null ? `$${parseFloat(o.total_amount).toFixed(2)}` : 'N/A',
                         paymentStatus: o.payment_status || 'Unknown',
                         deliveryStatus: o.fulfillment_status || 'Unknown',
-                        purchaseDate: o.created_at ? new Date(o.created_at).toLocaleDateString() : 'Unknown date'
+                        purchaseDate: o.created_at ? new Date(o.created_at).toLocaleDateString() : 'Unknown date',
+                        licenseStatus: orderLicenseStatus
                     });
                 } else {
                     items.forEach((item: any) => {
@@ -252,7 +280,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             amountFormatted: item.amount != null ? `$${parseFloat(item.amount).toFixed(2)}` : (o.total_amount != null ? `$${parseFloat(o.total_amount).toFixed(2)}` : 'N/A'),
                             paymentStatus: o.payment_status || 'Unknown',
                             deliveryStatus: o.fulfillment_status || 'Unknown',
-                            purchaseDate: o.created_at ? new Date(o.created_at).toLocaleDateString() : 'Unknown date'
+                            purchaseDate: o.created_at ? new Date(o.created_at).toLocaleDateString() : 'Unknown date',
+                            licenseStatus: orderLicenseStatus
                         });
                     });
                 }
@@ -264,11 +293,23 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 const masked = key.length > 10 ? `${key.substring(0, 5)}...${key.substring(key.length - 5)}` : '••••••••••••';
                 const identity = resolveIdentity('license', l.license_name, l.order_item_id, l.order_id, l.product_id, l.stripe_price_id, 'Cast Director Studio License', l);
 
+                const normalizeStatus = (s: string | null | undefined): string => {
+                    if (!s) return 'Inactive';
+                    const lower = s.toLowerCase();
+                    if (lower === 'active') return 'Active';
+                    if (lower === 'inactive') return 'Inactive';
+                    if (lower === 'refunded') return 'Refunded';
+                    if (lower === 'swapped') return 'Swapped';
+                    if (lower === 'revoked') return 'Revoked';
+                    if (lower === 'expired') return 'Expired';
+                    return 'Inactive';
+                };
+
                 mappedLicenses.push({
                     licenseName: identity.name,
                     licenseKeyFull: key,
                     licenseKeyMasked: masked,
-                    status: l.status === 'active' ? 'Active' : (l.status === 'revoked' ? 'Revoked' : 'Unknown'),
+                    status: normalizeStatus(l.status),
                     type: l.license_type || l.metadata?.license_type || 'Perpetual',
                     issuedOn: l.issued_on ? new Date(l.issued_on).toLocaleDateString() : (l.created_at ? new Date(l.created_at).toLocaleDateString() : 'Unknown date'),
                     assignedTo: l.assigned_to || session.user.email || 'Unknown',
@@ -294,7 +335,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             for (const [identityStr, tokens] of Array.from(downloadGroups.entries())) {
                 tokens.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
                 const now = new Date();
-                const validTokens = tokens.filter(t => t.expires_at && new Date(t.expires_at) > now && t.download_url);
+                const validTokens = tokens.filter(t => t.expires_at && new Date(t.expires_at) > now);
                 const selectedToken = validTokens.length > 0 ? validTokens[0] : tokens[0];
                 const isAvailable = selectedToken.expires_at ? new Date(selectedToken.expires_at) > now : false;
 
@@ -309,7 +350,6 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                     version: selectedToken.version || 'Latest',
                     fileType: selectedToken.file_type || catalogEntry?.fileType || 'Unknown',
                     expiresAt: selectedToken.expires_at ? new Date(selectedToken.expires_at).toLocaleDateString() : undefined,
-                    downloadUrl: selectedToken.download_url,
                     canGenerateNewLink: false,
                     isAvailable
                 });
@@ -449,7 +489,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
             const functionUrl = `${supabaseUrl}/functions/v1/create-checkout-session`;
 
-            const successUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=topup`;
+            const successUrl = `${window.location.origin}/get-started#session_id={CHECKOUT_SESSION_ID}&type=topup`;
             const cancelUrl = `${window.location.origin}/#pricing`;
 
             const response = await fetch(functionUrl, {
@@ -520,7 +560,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             }
 
             const successType = productKey.includes('updates') || productKey.includes('support') ? 'renewal' : 'byok';
-            const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
+            const returnUrl = `${window.location.origin}/get-started#session_id={CHECKOUT_SESSION_ID}&type=${successType}`;
 
             const catalogEntry = resolveCatalogEntryFromDbProduct(product);
 
@@ -590,7 +630,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 return;
             }
 
-            const returnUrl = `${window.location.origin}/get-started?session_id={CHECKOUT_SESSION_ID}&type=hosted`;
+            const returnUrl = `${window.location.origin}/get-started#session_id={CHECKOUT_SESSION_ID}&type=hosted`;
 
             const catalogEntry = resolveCatalogEntryFromDbProduct(product);
 
@@ -880,7 +920,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                         Active Licenses
                                     </div>
                                     <div className="text-4xl font-bold text-white">
-                                        {licenses ? licenses.filter(l => l.status === 'active').length : 0}
+                                        {licenses ? licenses.filter(l => l.status === 'Active').length : 0}
                                     </div>
                                     <p className="text-xs text-nano-text mt-2">Currently valid keys</p>
                                 </div>
@@ -1225,7 +1265,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 </div>
                             )}
 
-                            {/* Activated Devices Section */}
+                            {/* Activated Devices Section — only visible when at least one active BYOK license exists */}
+                            {(byokStatus?.hasIndie || byokStatus?.hasAgency) && (
                             <div id="activated-devices" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-bold">Activated Devices</h3>
@@ -1337,6 +1378,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     Need to move to a new device? Deactivate an existing one first, then open the app on your new device.
                                 </p>
                             </div>
+                            )}
 
                             <div className="grid lg:grid-cols-2 gap-8">
                                 {/* Left Column: Purchases & Subs */}
@@ -1362,6 +1404,17 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                             <div>Payment: <span className="text-white capitalize">{order.paymentStatus}</span></div>
                                                             <div>Delivery: <span className="text-white capitalize">{order.deliveryStatus}</span></div>
                                                         </div>
+                                                        {order.licenseStatus && order.licenseStatus !== 'active' && (
+                                                            <div className="mb-2">
+                                                                <span className={`text-[10px] px-2 py-0.5 rounded-sm uppercase tracking-wide border ${
+                                                                    order.licenseStatus === 'refunded' ? 'bg-amber-900/40 text-amber-400 border-amber-500/30' :
+                                                                    order.licenseStatus === 'revoked' ? 'bg-red-900/40 text-red-400 border-red-500/30' :
+                                                                    order.licenseStatus === 'swapped' ? 'bg-blue-900/40 text-blue-400 border-blue-500/30' :
+                                                                    order.licenseStatus === 'inactive' ? 'bg-white/5 text-nano-text/60 border-nano-border/20' :
+                                                                    'bg-white/5 text-nano-text/60 border-nano-border/20'
+                                                                }`}>License: {order.licenseStatus}</span>
+                                                            </div>
+                                                        )}
                                                         <div className="text-[10px] text-nano-text/60">
                                                             Purchased: {order.purchaseDate}
                                                         </div>
@@ -1407,21 +1460,17 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                         <h3 className="text-xl font-bold mb-6">Software Licenses</h3>
                                         {!licenses ? (
                                             <p className="text-nano-text text-sm italic">License vault is currently unavailable.</p>
-                                        ) : licenses.length === 0 ? (
-                                            <p className="text-nano-text text-sm">No licenses have been issued for this account.</p>
+                                        ) : licenses.filter(l => l.status === 'Active').length === 0 ? (
+                                            <p className="text-nano-text text-sm">No active software licenses.</p>
                                         ) : (
                                             <div className="space-y-4">
-                                                {licenses.map((lic, idx) => (
+                                                {licenses.filter(l => l.status === 'Active').map((lic, idx) => (
                                                     <div key={lic.licenseKeyFull || idx} className="p-4 bg-black/30 border border-nano-border/50 text-sm">
                                                         <div className="flex justify-between items-center mb-2">
                                                             <strong className="text-white block truncate max-w-[200px]" title={lic.licenseName}>
                                                                 {lic.licenseName}
                                                             </strong>
-                                                            {lic.status.toLowerCase() === 'active' ?
-                                                                <span className="text-[10px] bg-green-900/40 text-green-400 px-2 py-0.5 rounded-sm uppercase tracking-wide border border-green-500/30">Active</span>
-                                                                :
-                                                                <span className="text-[10px] bg-red-900/40 text-red-400 px-2 py-0.5 rounded-sm uppercase tracking-wide border border-red-500/30">{lic.status}</span>
-                                                            }
+                                                            <span className="text-[10px] bg-green-900/40 text-green-400 px-2 py-0.5 rounded-sm uppercase tracking-wide border border-green-500/30">Active</span>
                                                         </div>
 
                                                         <div className="grid grid-cols-2 gap-2 text-xs text-nano-text mb-3">
@@ -1444,6 +1493,28 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                         )}
                                                     </div>
                                                 ))}
+                                            </div>
+                                        )}
+                                        {/* Inactive/Revoked/Refunded licenses shown as a summary */}
+                                        {licenses && licenses.filter(l => l.status !== 'Active').length > 0 && (
+                                            <div className="mt-6 pt-4 border-t border-nano-border/30">
+                                                <h4 className="text-xs text-nano-text uppercase tracking-wide mb-3">Inactive Licenses</h4>
+                                                <div className="space-y-2">
+                                                    {licenses.filter(l => l.status !== 'Active').map((lic, idx) => (
+                                                        <div key={lic.licenseKeyFull || idx} className="p-3 bg-black/20 border border-nano-border/20 text-sm flex justify-between items-center opacity-60">
+                                                            <div>
+                                                                <span className="text-white/70 text-xs">{lic.licenseName}</span>
+                                                                <span className="text-[10px] text-nano-text/50 ml-2">Issued: {lic.issuedOn}</span>
+                                                            </div>
+                                                            <span className={`text-[10px] px-2 py-0.5 rounded-sm uppercase tracking-wide border ${
+                                                                lic.status === 'Refunded' ? 'bg-amber-900/40 text-amber-400 border-amber-500/30' :
+                                                                lic.status === 'Revoked' ? 'bg-red-900/40 text-red-400 border-red-500/30' :
+                                                                lic.status === 'Swapped' ? 'bg-blue-900/40 text-blue-400 border-blue-500/30' :
+                                                                'bg-white/5 text-nano-text/60 border-nano-border/20'
+                                                            }`}>{lic.status}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -1475,13 +1546,22 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                         )}
 
                                                         <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                                                            {dl.isAvailable && dl.downloadUrl ? (
-                                                                <a
-                                                                    href={dl.downloadUrl}
-                                                                    className="px-4 py-2 bg-nano-yellow text-black font-bold text-xs uppercase tracking-wide text-center hover:bg-nano-gold transition-colors block"
+                                                            {!(byokStatus?.hasIndie || byokStatus?.hasAgency) ? (
+                                                                <button
+                                                                    disabled
+                                                                    className="px-4 py-2 bg-gray-600 text-gray-400 font-bold text-xs uppercase tracking-wide text-center cursor-not-allowed border border-gray-600"
                                                                 >
+                                                                    License Inactive
+                                                                </button>
+                                                            ) : dl.isAvailable ? (
+                                                                <button
+                                                                    onClick={() => handleDownloadInstaller(dl.id)}
+                                                                    disabled={downloadingId === dl.id}
+                                                                    className="px-4 py-2 bg-nano-yellow text-black font-bold text-xs uppercase tracking-wide text-center hover:bg-nano-gold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                                                                >
+                                                                    {downloadingId === dl.id && <Loader2 size={14} className="animate-spin" />}
                                                                     Download Installer
-                                                                </a>
+                                                                </button>
                                                             ) : (
                                                                 <button
                                                                     disabled

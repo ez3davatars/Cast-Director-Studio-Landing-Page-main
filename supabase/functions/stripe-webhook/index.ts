@@ -27,12 +27,23 @@ serve(async (req: Request) => {
   }
 
   // Only process these exact payment events
-  if (event.type !== 'checkout.session.completed' && event.type !== 'invoice.paid') {
+  const allowedEvents = [
+    'checkout.session.completed', 
+    'invoice.paid',
+    'customer.subscription.deleted',
+    'customer.subscription.updated',
+    'charge.refunded',
+    'charge.refund.updated'
+  ];
+  if (!allowedEvents.includes(event.type)) {
       return new Response("Event type safely ignored.", { status: 200 });
   }
 
   const isSession = event.type === 'checkout.session.completed';
   const isInvoice = event.type === 'invoice.paid';
+  const isRefund = event.type === 'charge.refunded' || event.type === 'charge.refund.updated';
+  const isSubChange = event.type === 'customer.subscription.deleted' || event.type === 'customer.subscription.updated';
+  
   const dataObject = event.data.object;
   const isRecurringInvoice = isInvoice && dataObject.billing_reason === 'subscription_cycle';
 
@@ -63,6 +74,78 @@ serve(async (req: Request) => {
   }
 
   try {
+      if (isRefund) {
+          const charge = dataObject;
+          const isFullRefund = charge.refunded && charge.amount_refunded === charge.amount;
+          const paymentIntentId = charge.payment_intent;
+          
+          if (!paymentIntentId) return new Response("No payment intent", { status: 200 });
+          
+          const sessions = await stripe.checkout.sessions.list({ payment_intent: paymentIntentId as string });
+          let stripeSessionId = null;
+          if (sessions.data.length > 0) {
+              stripeSessionId = sessions.data[0].id;
+          }
+          
+          if (!stripeSessionId) return new Response("No session found for refund", { status: 200 });
+          
+          const { data: order } = await supabaseAdmin.from('orders').select('id, user_id').eq('stripe_session_id', stripeSessionId).maybeSingle();
+          if (!order) return new Response("No order found for refund", { status: 200 });
+
+          if (!isFullRefund) {
+              await supabaseAdmin.from('entitlement_events').insert([{
+                  entity_type: 'order',
+                  entity_id: order.id,
+                  user_id: order.user_id,
+                  event_type: 'partial_refund_flag',
+                  review_required: true,
+                  stripe_event_id: event.id,
+                  reason: 'Partial refund detected via webhook'
+              }]);
+              return new Response("Partial refund flagged", { status: 200 });
+          }
+
+          const { data: licenses } = await supabaseAdmin.from('licenses').select('id, status, user_id').eq('order_id', order.id);
+          if (licenses && licenses.length > 0) {
+              for (const lic of licenses) {
+                  if (lic.status !== 'refunded') {
+                      await supabaseAdmin.from('licenses').update({ status: 'refunded', updated_at: new Date().toISOString() }).eq('id', lic.id);
+                      await supabaseAdmin.from('entitlement_events').insert([{
+                          entity_type: 'license',
+                          entity_id: lic.id,
+                          user_id: lic.user_id,
+                          event_type: 'auto_refund',
+                          previous_status: lic.status,
+                          new_status: 'refunded',
+                          reason: 'Automated Stripe Full Refund',
+                          stripe_event_id: event.id
+                      }]);
+                  }
+              }
+          }
+          return new Response("Refund processed", { status: 200 });
+      }
+      
+      if (isSubChange) {
+          const sub = dataObject;
+          const status = sub.status;
+          const { data: dbSub } = await supabaseAdmin.from('subscriptions').select('id, status, user_id').eq('stripe_subscription_id', sub.id).maybeSingle();
+          if (dbSub && dbSub.status !== status) {
+              await supabaseAdmin.from('subscriptions').update({ status: status }).eq('id', dbSub.id);
+              await supabaseAdmin.from('entitlement_events').insert([{
+                  entity_type: 'subscription',
+                  entity_id: dbSub.id,
+                  user_id: dbSub.user_id,
+                  event_type: 'stripe_subscription_update',
+                  previous_status: dbSub.status,
+                  new_status: status,
+                  stripe_event_id: event.id,
+                  reason: 'Stripe webhook update'
+              }]);
+          }
+          return new Response("Subscription updated", { status: 200 });
+      }
+
       const stripeSessionId = isSession ? dataObject.id : null; 
       const stripeInvoiceId = isInvoice ? dataObject.id : null;
       const fulfillmentEntityId = isSession ? stripeSessionId : stripeInvoiceId;
@@ -249,22 +332,63 @@ serve(async (req: Request) => {
               throw new Error("License Minting Failed");
           }
 
-          const downloadId = crypto.randomUUID();
-          const { error: dlErr } = await supabaseAdmin.from('downloads').insert([{
-              id: downloadId,
-              user_id: userId,
-              order_id: newOrder.id,
-              order_item_id: newOrderItem?.id,
-              product_id: product.id,
-              stripe_price_id: priceId,
-              display_name: `${product.name} Installer`,
-              platform: product.platform || 'windows',
-              file_type: 'installer',
-              download_url: `https://castdirectorstudio.com/download/${downloadId}`,
-              expires_at: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-          }]);
+          try {
+              const { data: latestInstaller, error: instErr } = await supabaseAdmin
+                  .from('installers')
+                  .select('*')
+                  .eq('entitlement_scope', 'desktop_app_access')
+                  .eq('platform', 'windows')
+                  .eq('is_active', true)
+                  .eq('is_stable', true)
+                  .order('released_at', { ascending: false, nullsFirst: false })
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
 
-          if (dlErr) console.error(`[Warning] Failed to mint Download Installer:`, dlErr);
+              if (instErr) {
+                  console.error(`[Webhook] Error querying installers table:`, instErr);
+              }
+
+              if (!latestInstaller) {
+                  console.warn(`[Webhook] No active installer found; download entitlement not created`);
+              } else {
+                  // Duplicate protection
+                  const { data: existingDl } = await supabaseAdmin
+                      .from('downloads')
+                      .select('id')
+                      .eq('order_id', newOrder.id)
+                      .eq('installer_id', latestInstaller.id)
+                      .maybeSingle();
+
+                  if (!existingDl) {
+                      const downloadId = crypto.randomUUID();
+                      const downloadToken = "dl_" + crypto.randomUUID().replace(/-/g, '');
+                      const { error: dlErr } = await supabaseAdmin.from('downloads').insert([{
+                          id: downloadId,
+                          user_id: userId,
+                          order_id: newOrder.id,
+                          order_item_id: newOrderItem?.id,
+                          product_id: product.id,
+                          stripe_price_id: priceId,
+                          installer_id: latestInstaller.id,
+                          display_name: "Cast Director Studio Windows Installer",
+                          platform: latestInstaller.platform,
+                          version: latestInstaller.version,
+                          file_type: "installer",
+                          download_url: latestInstaller.file_url,
+                          customer_email: customerEmail,
+                          download_token: downloadToken,
+                          expires_at: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+                          download_count: 0,
+                          max_downloads: 10
+                      }]);
+
+                      if (dlErr) console.error(`[Warning] Failed to mint Download Installer:`, dlErr);
+                  }
+              }
+          } catch (dlCatchErr) {
+              console.error(`[Webhook] Unexpected error creating download entitlement:`, dlCatchErr);
+          }
 
           emailAction = 'license_download_details';
       }

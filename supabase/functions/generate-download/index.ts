@@ -17,6 +17,14 @@ serve(async (req: Request) => {
   }
 
   try {
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: "unauthorized", message: "Missing authorization header." }), 
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const { download_id } = await req.json();
 
     if (!download_id) {
@@ -32,16 +40,27 @@ serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // 3. Resolve Download Tracking Row and joined Product Config
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
+    
+    if (userErr || !user) {
+      return new Response(
+        JSON.stringify({ error: "unauthorized", message: "Invalid authorization token." }), 
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 3. Resolve Download Tracking Row and joined Installer Config
     const { data: download, error: dbErr } = await supabaseAdmin
       .from('downloads')
-      .select('*, product:products(*)')
+      .select('*, installer:installers(*)')
       .eq('id', download_id)
+      .eq('user_id', user.id)
       .maybeSingle();
 
     if (dbErr || !download) {
       return new Response(
-        JSON.stringify({ error: "not_found", message: "This download link is invalid or does not exist." }),
+        JSON.stringify({ error: "DOWNLOAD_NOT_FOUND", message: "This download link is invalid or does not exist." }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -67,35 +86,35 @@ serve(async (req: Request) => {
     }
 
     // 5. Explicit Missing Installer Handling
-    const product = download.product || {};
-    const installerObjectKey = product.installer_object_key;
+    const installer = download.installer || {};
+    const installerObjectKey = installer.storage_path;
     
     if (!installerObjectKey) {
-        // As defined by rule 3: strict installer mapping checking
-        console.error(`[Edge Download] Missing installer_object_key for Product ${product.id}`);
+        console.error(`[Edge Download] Missing storage_path for Installer ${installer.id}`);
         return new Response(
-            JSON.stringify({ error: "missing_installer", message: "This installer is not available yet." }),
+            JSON.stringify({ error: "INSTALLER_STORAGE_PATH_MISSING", message: "This installer is not available yet." }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
     }
 
     // 6. Connect to Cloudflare R2 and generate S3 Compliant V4 Signed URL
-    const r2AccountId = Deno.env.get("R2_ACCOUNT_ID");
-    const r2AccessKey = Deno.env.get("R2_ACCESS_KEY_ID");
-    const r2SecretKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
-    const r2Bucket = Deno.env.get("R2_BUCKET_NAME");
+    const r2AccountId = Deno.env.get("CLOUDFLARE_R2_ACCOUNT_ID");
+    const r2AccessKey = Deno.env.get("CLOUDFLARE_R2_ACCESS_KEY_ID");
+    const r2SecretKey = Deno.env.get("CLOUDFLARE_R2_SECRET_ACCESS_KEY");
+    const r2Bucket = Deno.env.get("CLOUDFLARE_R2_BUCKET_DOWNLOADS");
+    const r2Endpoint = Deno.env.get("CLOUDFLARE_R2_ENDPOINT");
 
-    if (!r2AccountId || !r2AccessKey || !r2SecretKey || !r2Bucket) {
+    if (!r2AccountId || !r2AccessKey || !r2SecretKey || !r2Bucket || !r2Endpoint) {
         console.error("[CRITICAL] Missing Edge Environment variables for Cloudflare R2 Gateway");
         return new Response(
-            JSON.stringify({ error: "config_error", message: "Delivery infrastructure is misconfigured." }),
+            JSON.stringify({ error: "R2_CONFIG_MISSING", message: "Delivery infrastructure is misconfigured." }),
             { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
     }
 
     const s3 = new S3Client({
         region: "auto",
-        endpoint: `https://${r2AccountId}.r2.cloudflarestorage.com`,
+        endpoint: r2Endpoint,
         credentials: {
             accessKeyId: r2AccessKey,
             secretAccessKey: r2SecretKey,
@@ -116,9 +135,17 @@ serve(async (req: Request) => {
         .update({ download_count: (download.download_count || 0) + 1 })
         .eq('id', download_id);
 
+    // Extract filename from storage path
+    const filename = installerObjectKey.split('/').pop() || download.display_name || "installer.exe";
+
     // 7. Success - Hand back the presigned URL boundary securely.
     return new Response(
-      JSON.stringify({ targetUrl }),
+      JSON.stringify({ 
+          url: targetUrl,
+          filename: filename,
+          version: installer.version || "1.0.0",
+          expiresInSeconds: 300
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
