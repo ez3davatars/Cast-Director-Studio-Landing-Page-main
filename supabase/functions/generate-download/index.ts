@@ -1,8 +1,9 @@
-// @ts-nocheck
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { S3Client, GetObjectCommand } from "https://esm.sh/@aws-sdk/client-s3@3.540.0";
-import { getSignedUrl } from "https://esm.sh/@aws-sdk/s3-request-presigner@3.540.0";
+// @ts-nocheck: Supabase Edge Function uses external runtime SDK types validated at deployment/runtime.
+import { serve } from "std/http/server";
+import { createClient } from "@supabase/supabase-js";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
