@@ -54,13 +54,149 @@ serve(async (req: Request) => {
     }
 
     // 3. Resolve Download Tracking Row
-    const { data: download, error: dbErr } = await supabaseAdmin
-      .from('downloads')
-      .select('*')
-      .eq('id', downloadId)
-      .maybeSingle();
+    let download = null;
+    let hasByokLicense = false;
 
-    if (dbErr || !download) {
+    // Check if the authenticated user has an active BYOK license
+    const { data: userLicenses, error: licErr } = await supabaseAdmin
+      .from('licenses')
+      .select('*')
+      .eq('status', 'active')
+      .or(`user_id.eq.${user.id},assigned_to.ilike.${user.email || ''}`);
+
+    let byokLicenses = [];
+    if (userLicenses && userLicenses.length > 0) {
+      const productIds = userLicenses.map((l: any) => l.product_id).filter(Boolean);
+      let products = [];
+      if (productIds.length > 0) {
+        const { data: prods } = await supabaseAdmin
+          .from('products')
+          .select('id, product_key')
+          .in('id', productIds);
+        if (prods) {
+          products = prods;
+        }
+      }
+      const productsMap = new Map(products.map((p: any) => [p.id, p.product_key]));
+
+      byokLicenses = userLicenses.filter((l: any) => {
+        const pk = productsMap.get(l.product_id) || l.metadata?.product_key;
+        return pk === 'indie_desktop_byok' || pk === 'agency_desktop_byok' || pk === 'agency_commercial_byok';
+      });
+
+      if (byokLicenses.length > 0) {
+        hasByokLicense = true;
+      }
+    }
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isValidUuid = typeof downloadId === 'string' && uuidRegex.test(downloadId);
+
+    if (isValidUuid) {
+      const { data, error: dbErr } = await supabaseAdmin
+        .from('downloads')
+        .select('*')
+        .eq('id', downloadId)
+        .maybeSingle();
+      if (data) {
+        download = data;
+      }
+    }
+
+    // Handle byok-windows-installer sentinel or missing download row for BYOK license
+    if (downloadId === 'byok-windows-installer' || (!download && hasByokLicense)) {
+      if (!hasByokLicense) {
+        return new Response(
+          JSON.stringify({ error: "no_active_byok_license", message: "No active BYOK desktop license found for this user." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 3b. Resolve the user's valid BYOK order
+      let resolvedOrderId = null;
+
+      // Try 1: Find an active BYOK license with a non-null order_id
+      const licenseWithOrder = byokLicenses.find((l: any) => l.order_id);
+      if (licenseWithOrder) {
+        resolvedOrderId = licenseWithOrder.order_id;
+      }
+
+      // Try 2: Look up an existing downloads row for this user that has an order_id
+      if (!resolvedOrderId) {
+        const { data: existingDownloads } = await supabaseAdmin
+          .from('downloads')
+          .select('order_id')
+          .eq('user_id', user.id)
+          .not('order_id', 'is', null)
+          .limit(1);
+        if (existingDownloads && existingDownloads.length > 0) {
+          resolvedOrderId = existingDownloads[0].order_id;
+        }
+      }
+
+      // Try 3: Search the user's order history in orders table (by user_id or customer_email)
+      if (!resolvedOrderId) {
+        const { data: userOrders } = await supabaseAdmin
+          .from('orders')
+          .select('id')
+          .or(`user_id.eq.${user.id},customer_email.ilike.${user.email || ''}`)
+          .order('created_at', { ascending: false });
+        if (userOrders && userOrders.length > 0) {
+          resolvedOrderId = userOrders[0].id;
+        }
+      }
+
+      if (!resolvedOrderId) {
+        return new Response(
+          JSON.stringify({ error: "eligible_order_not_found", message: "No eligible purchase order was found for your license." }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Try to find a download row pointing to this user/order/installer
+      const { data: existingDl } = await supabaseAdmin
+        .from('downloads')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('order_id', resolvedOrderId)
+        .eq('installer_id', 'e6c82c14-d748-41ab-b1fb-ed4bfcc3d291')
+        .maybeSingle();
+
+      if (existingDl) {
+        download = existingDl;
+      } else {
+        // Insert a new download row
+        const newDownloadRow = {
+          order_id: resolvedOrderId,
+          user_id: user.id,
+          installer_id: 'e6c82c14-d748-41ab-b1fb-ed4bfcc3d291',
+          display_name: 'Cast Director Studio Windows Installer',
+          platform: 'windows',
+          version: '1.0.0',
+          file_type: 'installer',
+          download_count: 0,
+          max_downloads: 10,
+          customer_email: user.email
+        };
+
+        const { data: inserted, error: insertErr } = await supabaseAdmin
+          .from('downloads')
+          .insert(newDownloadRow)
+          .select()
+          .single();
+
+        if (insertErr || !inserted) {
+          console.error("[Refresh Error] Failed to insert new downloads row:", insertErr);
+          return new Response(
+            JSON.stringify({ error: "refresh_failed", message: "Could not create download link. Please contact support." }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        download = inserted;
+      }
+    }
+
+    if (!download) {
       return new Response(
         JSON.stringify({ error: "DOWNLOAD_NOT_FOUND", message: "This download link is invalid or does not exist." }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -90,22 +226,27 @@ serve(async (req: Request) => {
     }
 
     // 5. Confirm related purchase/license is still valid
-    const { data: licList, error: _licErr } = await supabaseAdmin
-      .from('licenses')
-      .select('*')
-      .eq('product_id', download.product_id)
-      .eq('status', 'active')
-      .or(`user_id.eq.${user.id},assigned_to.ilike.${user.email}`);
+    let activePurchase = false;
+    if (hasByokLicense && download.installer_id === 'e6c82c14-d748-41ab-b1fb-ed4bfcc3d291') {
+      activePurchase = true;
+    } else {
+      const { data: licList, error: _licErr } = await supabaseAdmin
+        .from('licenses')
+        .select('*')
+        .eq('product_id', download.product_id)
+        .eq('status', 'active')
+        .or(`user_id.eq.${user.id},assigned_to.ilike.${user.email}`);
 
-    let activePurchase = licList && licList.length > 0;
-    if (!activePurchase && download.order_id) {
-      const { data: order } = await supabaseAdmin
-        .from('orders')
-        .select('payment_status, fulfillment_status')
-        .eq('id', download.order_id)
-        .maybeSingle();
-      if (order && (order.payment_status?.toLowerCase() === 'paid' || order.fulfillment_status?.toLowerCase() === 'fulfilled')) {
-        activePurchase = true;
+      activePurchase = licList && licList.length > 0;
+      if (!activePurchase && download.order_id) {
+        const { data: order } = await supabaseAdmin
+          .from('orders')
+          .select('payment_status, fulfillment_status')
+          .eq('id', download.order_id)
+          .maybeSingle();
+        if (order && (order.payment_status?.toLowerCase() === 'paid' || order.fulfillment_status?.toLowerCase() === 'fulfilled')) {
+          activePurchase = true;
+        }
       }
     }
 

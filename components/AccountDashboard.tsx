@@ -167,46 +167,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         }
     };
 
-    const handleRefreshDownloadLink = useCallback(async (downloadId: string) => {
-        setRefreshingId(downloadId);
-        setRefreshErrors((prev) => {
-            const next = { ...prev };
-            delete next[downloadId];
-            return next;
-        });
 
-        try {
-            const { data, error } = await invokeAuthenticatedFunction('refresh-download-link', { downloadId });
-
-            if (error || !data || !data.success) {
-                console.error("Download refresh failed:", error || data?.error);
-                throw new Error(data?.message || data?.error || 'Could not refresh download link. Please contact support.');
-            }
-
-            // Update the local downloads/dashboard state with the refreshed expiresAt and availability
-            setDownloads((prev) => {
-                if (!prev) return prev;
-                return prev.map((dl) => {
-                    if (dl.id === downloadId) {
-                        return {
-                            ...dl,
-                            expiresAt: data.expiresAt,
-                            isAvailable: true,
-                        };
-                    }
-                    return dl;
-                });
-            });
-        } catch (err) {
-            const message = err instanceof Error ? err.message : 'Could not refresh download link. Please contact support.';
-            setRefreshErrors((prev) => ({
-                ...prev,
-                [downloadId]: message,
-            }));
-        } finally {
-            setRefreshingId(null);
-        }
-    }, [setDownloads]);
 
     const isExpiringOrExpired = (date: Date | null): boolean => {
         if (!date) return false;
@@ -447,6 +408,25 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 downloadGroups.get(identityStr)!.push(d);
             });
 
+            // Analyze BYOK license ownership
+            const getByokExpiration = (lic: any): Date | null => {
+                if (!lic) return null;
+                const updates = lic.updates_expires_at ? new Date(lic.updates_expires_at) : null;
+                const support = lic.support_expires_at ? new Date(lic.support_expires_at) : null;
+                if (updates && support) return updates < support ? updates : support;
+                return updates || support || null;
+            };
+            const indieLic = fetchedLicenses.find((l: any) => {
+                const prod = productsMap.get(l.product_id);
+                const pk = prod?.product_key || l.metadata?.product_key;
+                return pk === 'indie_desktop_byok' && l.status?.toLowerCase() === 'active';
+            });
+            const agencyLic = fetchedLicenses.find((l: any) => {
+                const prod = productsMap.get(l.product_id);
+                const pk = prod?.product_key || l.metadata?.product_key;
+                return (pk === 'agency_desktop_byok' || pk === 'agency_commercial_byok') && l.status?.toLowerCase() === 'active';
+            });
+
             const mappedDownloads: DownloadViewModel[] = [];
             for (const [identityStr, tokens] of Array.from(downloadGroups.entries())) {
                 tokens.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
@@ -471,6 +451,33 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 });
             }
 
+            const hasActiveByok = !!(indieLic || agencyLic);
+            const hasWindowsInstaller = mappedDownloads.some(dl => {
+                const platform = String(dl.platform ?? '').toLowerCase();
+                const fileType = String(dl.fileType ?? '').toLowerCase();
+                const productName = String(dl.productName ?? '').toLowerCase();
+                return (
+                    platform.includes('windows') ||
+                    platform.includes('win') ||
+                    fileType.includes('exe') ||
+                    fileType.includes('installer') ||
+                    productName.includes('windows')
+                );
+            });
+
+            if (hasActiveByok && !hasWindowsInstaller) {
+                mappedDownloads.push({
+                    id: 'byok-windows-installer',
+                    productName: 'Cast Director Studio Windows Installer',
+                    platform: 'windows',
+                    version: '1.0.0',
+                    fileType: 'installer',
+                    expiresAt: undefined,
+                    canGenerateNewLink: true,
+                    isAvailable: false
+                });
+            }
+
             setCredits(walletRes.data?.credit_balance ?? null);
 
             // Fetch account status separately — columns may not exist if migration hasn't run yet
@@ -485,27 +492,15 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             }
             setOrders(mappedOrders.length > 0 ? mappedOrders : null);
             setLicenses(mappedLicenses.length > 0 ? mappedLicenses : null);
-            setDownloads(mappedDownloads.length > 0 ? mappedDownloads : null);
+
+            if (downloadsRes.error) {
+                console.error("Failed to load downloads data:", downloadsRes.error);
+                setDownloads(null);
+            } else {
+                setDownloads(mappedDownloads);
+            }
             setSubscriptions(subsRes.data ?? null);
 
-            // Analyze BYOK license ownership
-            const getByokExpiration = (lic: any): Date | null => {
-                if (!lic) return null;
-                const updates = lic.updates_expires_at ? new Date(lic.updates_expires_at) : null;
-                const support = lic.support_expires_at ? new Date(lic.support_expires_at) : null;
-                if (updates && support) return updates < support ? updates : support;
-                return updates || support || null;
-            };
-            const indieLic = fetchedLicenses.find((l: any) => {
-                const prod = productsMap.get(l.product_id);
-                const pk = prod?.product_key || l.metadata?.product_key;
-                return pk === 'indie_desktop_byok' && l.status?.toLowerCase() === 'active';
-            });
-            const agencyLic = fetchedLicenses.find((l: any) => {
-                const prod = productsMap.get(l.product_id);
-                const pk = prod?.product_key || l.metadata?.product_key;
-                return (pk === 'agency_desktop_byok' || pk === 'agency_commercial_byok') && l.status?.toLowerCase() === 'active';
-            });
             setByokStatus({
                 hasIndie: !!indieLic,
                 hasAgency: !!agencyLic,
@@ -573,6 +568,66 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             setLoading(false);
         }
     };
+
+    const handleRefreshDownloadLink = useCallback(async (downloadId: string) => {
+        setRefreshingId(downloadId);
+        setRefreshErrors((prev) => {
+            const next = { ...prev };
+            delete next[downloadId];
+            return next;
+        });
+
+        try {
+            const { data, error } = await invokeAuthenticatedFunction('refresh-download-link', { downloadId });
+
+            if (error || !data || !data.success) {
+                console.error("Download refresh failed:", error || data?.error);
+                throw new Error(data?.message || data?.error || 'Could not refresh download link. Please contact support.');
+            }
+
+            if (downloadId === 'byok-windows-installer') {
+                await loadDashboard();
+            } else {
+                // Update the local downloads/dashboard state with the refreshed expiresAt and availability
+                setDownloads((prev) => {
+                    if (!prev) return prev;
+                    return prev.map((dl) => {
+                        if (dl.id === downloadId) {
+                            return {
+                                ...dl,
+                                expiresAt: data.expiresAt,
+                                isAvailable: true,
+                            };
+                        }
+                        return dl;
+                    });
+                });
+            }
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            let message = 'Could not refresh download link. Please contact support.';
+
+            if (errMsg === 'eligible_order_not_found') {
+                message = 'We could not find an eligible purchase order associated with your BYOK license to generate a download link. Please claim guest purchases or contact support.';
+            } else if (errMsg === 'no_active_byok_license') {
+                message = 'An active BYOK desktop license is required to generate this download link.';
+            } else if (errMsg === 'installer_not_found' || errMsg === 'DOWNLOAD_NOT_FOUND') {
+                message = 'The official Windows installer file could not be found on the download server.';
+            } else if (errMsg === 'refresh_failed') {
+                message = 'The download link generation failed on the server. Please try again or contact support.';
+            } else {
+                message = errMsg;
+            }
+
+            setRefreshErrors((prev) => ({
+                ...prev,
+                [downloadId]: message,
+            }));
+        } finally {
+            setRefreshingId(null);
+        }
+    }, [setDownloads, loadDashboard]);
+
 
     useEffect(() => {
         // Safety net: silently invoke claim-purchases on mount to link any
@@ -918,6 +973,10 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
         if (windowsDownloads.length > 0) {
             const bestWindowsDownload = [...windowsDownloads].sort((a, b) => {
+                const aIsSynthesized = a.id === 'byok-windows-installer';
+                const bIsSynthesized = b.id === 'byok-windows-installer';
+                if (aIsSynthesized !== bIsSynthesized) return aIsSynthesized ? 1 : -1;
+
                 const aExpired = !a.isAvailable || isExpiredDownload(a);
                 const bExpired = !b.isAvailable || isExpiredDownload(b);
 
@@ -2042,9 +2101,9 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                             <div className="text-xs text-nano-text mb-4">
                                                                 Download link valid until {dl.expiresAt}
                                                             </div>
-                                                        ) : (byokStatus?.hasIndie || byokStatus?.hasAgency) ? (
+                                                        ) : (dl.id === 'byok-windows-installer' || byokStatus?.hasIndie || byokStatus?.hasAgency) ? (
                                                             <div className="text-xs text-nano-yellow mb-4">
-                                                                Download link expired. Your purchase remains active.
+                                                                No active installer link found. Generate a fresh download link.
                                                             </div>
                                                         ) : (
                                                             <div className="text-xs text-nano-text mb-4">
@@ -2071,6 +2130,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                                 </button>
                                                             ) : (() => {
                                                                 const downloadId = getDownloadId(dl);
+                                                                const isSynthesized = dl.id === 'byok-windows-installer';
+                                                                const buttonText = isSynthesized ? 'Generate Download Link' : 'Generate Fresh Download Link';
                                                                 return (
                                                                     <button
                                                                         onClick={() => {
@@ -2087,7 +2148,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                                         className="px-4 py-2 bg-nano-yellow text-black font-bold text-xs uppercase tracking-wide text-center hover:bg-nano-gold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                                                                     >
                                                                         {refreshingId === downloadId && <Loader2 size={14} className="animate-spin" />}
-                                                                        Generate Fresh Download Link
+                                                                        {buttonText}
                                                                     </button>
                                                                 );
                                                             })()}
