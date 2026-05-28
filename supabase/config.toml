@@ -50,3 +50,12 @@ verify_jwt = false
 
 [functions.generate-download]
 verify_jwt = false
+
+[functions.request-refund-review]
+verify_jwt = false
+
+[functions.get-my-refund-reviews]
+verify_jwt = false
+
+[functions.get-my-desktop-licenses]
+verify_jwt = false

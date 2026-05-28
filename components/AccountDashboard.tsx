@@ -24,8 +24,42 @@ interface AccountDashboardProps {
     session: Session;
 }
 
+const getActivationLimit = (license: any): number => {
+  return Number(
+    license?.max_activations ??
+    license?.device_limit ??
+    2
+  );
+};
+
 const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     const [loading, setLoading] = useState(true);
+    const [dbProducts, setDbProducts] = useState<any[]>([]);
+    const displayEmail = new URLSearchParams(window.location.search).get('override_email') || session.user.email;
+
+    const resolveSubKey = (item: any): string => {
+        if (!item) return '';
+        if (item.metadata?.product_key) return item.metadata.product_key;
+        if (item.product_id && dbProducts && dbProducts.length > 0) {
+            const dbProd = dbProducts.find((p: any) => p.id === item.product_id);
+            if (dbProd?.product_key) return dbProd.product_key;
+        }
+        return (
+            item?.product_key ||
+            item?.productKey ||
+            item?.plan_key ||
+            item?.planKey ||
+            item?.subscription_key ||
+            item?.subscriptionKey ||
+            item?.sku ||
+            item?.price_id ||
+            item?.stripe_price_id ||
+            item?.metadata?.product_key ||
+            item?.metadata?.plan_key ||
+            item?.metadata?.subscription_key ||
+            ''
+        );
+    };
 
     // Core data streams
     const [credits, setCredits] = useState<number | null>(null);
@@ -56,6 +90,17 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     // Billing Portal state
     const [portalLoading, setPortalLoading] = useState(false);
     const [portalError, setPortalError] = useState<string | null>(null);
+
+    // Refund review states
+    const [refundReviews, setRefundReviews] = useState<any[]>([]);
+    const [fetchingRefunds, setFetchingRefunds] = useState(false);
+    const [submittingRefund, setSubmittingRefund] = useState(false);
+    const [refundError, setRefundError] = useState<string | null>(null);
+    const [refundSuccessMsg, setRefundSuccessMsg] = useState<string | null>(null);
+    const [showRefundModal, setShowRefundModal] = useState(false);
+    const [refundReason, setRefundReason] = useState('');
+    const [refundMessage, setRefundMessage] = useState('');
+    const [refundCheckAck, setRefundCheckAck] = useState(false);
 
     // Support ticket notification state
     const [unreadTicketCount, setUnreadTicketCount] = useState(0);
@@ -126,6 +171,25 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         return date <= new Date();
     };
 
+    const loadRefundReviews = async () => {
+        try {
+            setFetchingRefunds(true);
+            setRefundError(null);
+            const { data, error } = await supabase.functions.invoke('get-my-refund-reviews');
+            if (error) {
+                console.error("Failed to load refund reviews:", error);
+                setRefundError("Failed to load refund status");
+            } else if (data) {
+                setRefundReviews(data);
+            }
+        } catch (e) {
+            console.error("Failed to load refund reviews:", e);
+            setRefundError("Failed to load refund status");
+        } finally {
+            setFetchingRefunds(false);
+        }
+    };
+
     const loadDashboard = async () => {
         // Clean up billing portal return query param
         const params = new URLSearchParams(window.location.search);
@@ -135,16 +199,20 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             window.history.replaceState({}, '', `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}`);
         }
 
+        // Test overrides
+        const targetUserId = params.get('override_user') || session.user.id;
+        const targetUserEmail = params.get('override_email') || session.user.email;
+
         try {
             setLoading(true);
             setErrorState(null);
 
-            const fetchWallet = supabase.from('profiles').select('credit_balance').eq('id', session.user.id).maybeSingle().then(res => res.error ? { data: null, error: res.error } : res);
+            const fetchWallet = supabase.from('profiles').select('credit_balance').eq('id', targetUserId).maybeSingle().then(res => res.error ? { data: null, error: res.error } : res);
             const fetchProducts = supabase.from('products').select('*');
-            const fetchOrders = supabase.from('orders').select('*, order_items(*)').eq('user_id', session.user.id).order('created_at', { ascending: false });
-            const fetchLicenses = supabase.from('licenses').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
-            const fetchDownloads = supabase.from('downloads').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
-            const fetchSubs = supabase.from('subscriptions').select('id, status, product_id, current_period_end, canceled_at, updated_at, metadata').eq('user_id', session.user.id).order('updated_at', { ascending: false }).then(res => res.error ? { data: null, error: res.error } : res);
+            const fetchOrders = supabase.from('orders').select('*, order_items(*)').eq('user_id', targetUserId).order('created_at', { ascending: false });
+            const fetchLicenses = supabase.from('licenses').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false });
+            const fetchDownloads = supabase.from('downloads').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false });
+            const fetchSubs = supabase.from('subscriptions').select('id, status, product_id, current_period_end, canceled_at, updated_at, metadata, created_at').eq('user_id', targetUserId).order('updated_at', { ascending: false }).then(res => res.error ? { data: null, error: res.error } : res);
 
             const [walletRes, productsRes, ordersRes, licensesRes, downloadsRes, subsRes] = await Promise.all([
                 fetchWallet, fetchProducts, fetchOrders, fetchLicenses, fetchDownloads, fetchSubs
@@ -158,6 +226,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             }
 
             const fetchedProducts = productsRes.data || [];
+            setDbProducts(fetchedProducts);
             const fetchedOrders = ordersRes.data || [];
             const fetchedLicenses = licensesRes.data || [];
             const fetchedDownloads = downloadsRes.data || [];
@@ -312,7 +381,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                     status: normalizeStatus(l.status),
                     type: l.license_type || l.metadata?.license_type || 'Perpetual',
                     issuedOn: l.issued_on ? new Date(l.issued_on).toLocaleDateString() : (l.created_at ? new Date(l.created_at).toLocaleDateString() : 'Unknown date'),
-                    assignedTo: l.assigned_to || session.user.email || 'Unknown',
+                    assignedTo: l.assigned_to || targetUserEmail || 'Unknown',
                     entitlements: l.metadata?.entitlements
                 });
             });
@@ -359,7 +428,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
             // Fetch account status separately — columns may not exist if migration hasn't run yet
             try {
-                const { data: statusRes } = await supabase.from('profiles').select('account_status, account_status_reason').eq('id', session.user.id).maybeSingle();
+                const { data: statusRes } = await supabase.from('profiles').select('account_status, account_status_reason').eq('id', targetUserId).maybeSingle();
                 if (statusRes) {
                     setAccountStatus(statusRes.account_status || 'active');
                     setAccountStatusReason(statusRes.account_status_reason || null);
@@ -382,11 +451,13 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             };
             const indieLic = fetchedLicenses.find((l: any) => {
                 const prod = productsMap.get(l.product_id);
-                return prod?.product_key === 'indie_desktop_byok' && l.status === 'active';
+                const pk = prod?.product_key || l.metadata?.product_key;
+                return pk === 'indie_desktop_byok' && l.status?.toLowerCase() === 'active';
             });
             const agencyLic = fetchedLicenses.find((l: any) => {
                 const prod = productsMap.get(l.product_id);
-                return prod?.product_key === 'agency_desktop_byok' && l.status === 'active';
+                const pk = prod?.product_key || l.metadata?.product_key;
+                return (pk === 'agency_desktop_byok' || pk === 'agency_commercial_byok') && l.status?.toLowerCase() === 'active';
             });
             setByokStatus({
                 hasIndie: !!indieLic,
@@ -423,7 +494,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 const { data: activations } = await supabase
                     .from('device_activations')
                     .select('*')
-                    .eq('user_id', session.user.id)
+                    .eq('user_id', targetUserId)
                     .order('first_activated_at', { ascending: false });
 
                 if (activations) {
@@ -431,21 +502,23 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 }
 
                 // Determine device limit from strongest license
-                const bestLicense = fetchedLicenses
-                    .filter((l: any) => l.status === 'active')
-                    .sort((a: any, b: any) => (b.device_limit || 2) - (a.device_limit || 2))[0];
-                if (bestLicense?.device_limit) {
-                    setDeviceLimit(bestLicense.device_limit);
+                const activeLicensesList = fetchedLicenses.filter((l: any) => l.status?.toLowerCase() === 'active');
+                const bestLicense = activeLicensesList
+                    .sort((a: any, b: any) => getActivationLimit(b) - getActivationLimit(a))[0];
+                if (bestLicense) {
+                    setDeviceLimit(getActivationLimit(bestLicense));
                 }
             } catch (e) {
                 console.warn('[Dashboard] device_activations fetch failed (table may not exist yet):', e);
             }
 
             const lacksData = fetchedOrders.length === 0 && fetchedLicenses.length === 0 && fetchedDownloads.length === 0;
-            if (lacksData && session.user.email) {
-                const guestCheck = await supabase.from('orders').select('id').eq('customer_email', session.user.email).is('user_id', null).limit(1).maybeSingle();
+            if (lacksData && targetUserEmail) {
+                const guestCheck = await supabase.from('orders').select('id').eq('customer_email', targetUserEmail).is('user_id', null).limit(1).maybeSingle();
                 if (guestCheck.data) setHasGuestPurchases(true);
             }
+
+            await loadRefundReviews();
         } catch (err) {
             console.error("Dashboard massive structural failure:", err);
             setErrorState("An unexpected error occurred while loading your dashboard. Please check console for details.");
@@ -467,7 +540,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             loadDashboard();
         };
         claimAndLoad();
-    }, [session.user.id, session.user.email]);
+    }, [session.user.id, session.user.email, window.location.search]);
 
     // ── Credit Top-Up Checkout ──
     // Uses productKey-only contract — the Edge Function resolves the Stripe price server-side.
@@ -774,7 +847,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                         <div>
                             <h2 className="text-3xl md:text-4xl font-bold mb-2">Account Dashboard</h2>
                             <p className="text-nano-text">
-                                Signed in as {session.user.email}
+                                Signed in as {displayEmail}
                             </p>
                         </div>
                         {unreadTicketCount === 0 && (
@@ -879,7 +952,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     <div>
                                         <h3 className="text-xl font-bold text-nano-yellow mb-1">Unclaimed Purchases Found</h3>
                                         <p className="text-sm text-nano-text">
-                                            We found guest purchases associated with <strong>{session.user.email}</strong> that aren't linked to your account yet.
+                                            We found guest purchases associated with <strong>{displayEmail}</strong> that aren't linked to your account yet.
                                         </p>
                                     </div>
                                     <button
@@ -901,6 +974,128 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                         loadDashboard();
                                     }}
                                 />
+                            )}
+
+                            {showRefundModal && (
+                                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                                    <div className="relative w-full max-w-lg rounded-2xl bg-gradient-to-b from-slate-950 via-[#0d1324] to-[#161f36] border border-white/[0.08] shadow-2xl p-6 md:p-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-red-500/50 to-transparent" />
+
+                                        <div className="flex justify-between items-start mb-6">
+                                            <h3 className="text-xl font-bold text-white font-display">Fit Guarantee Refund Request</h3>
+                                            <button
+                                                onClick={() => setShowRefundModal(false)}
+                                                className="text-slate-400 hover:text-white transition-colors"
+                                                aria-label="Close modal"
+                                            >
+                                                <X size={20} />
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-4 mb-6">
+                                            <p className="text-sm text-slate-300 leading-relaxed">
+                                                We want you to love Cast Director Studio. Under our <strong>7-Day Fit Guarantee</strong>, you can cancel your subscription and receive a refund.
+                                            </p>
+
+                                            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-2.5">
+                                                <div className="flex items-start gap-2.5 text-xs text-slate-400">
+                                                    <span className="text-red-400 mt-0.5">✦</span>
+                                                    <span>Used credits are non-refundable and will be deducted from your refund amount.</span>
+                                                </div>
+                                                <div className="flex items-start gap-2.5 text-xs text-slate-400">
+                                                    <span className="text-red-400 mt-0.5">✦</span>
+                                                    <span>Remaining subscription credits will be immediately revoked if the refund is approved.</span>
+                                                </div>
+                                                <div className="flex items-start gap-2.5 text-xs text-slate-400">
+                                                    <span className="text-red-400 mt-0.5">✦</span>
+                                                    <span>Final review and processing is handled by an administrator within 3-5 business days.</span>
+                                                </div>
+                                            </div>
+
+                                            {refundError && (
+                                                <div className="p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-xs rounded-lg">
+                                                    {refundError}
+                                                </div>
+                                            )}
+
+                                            <div>
+                                                <label className="block text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">
+                                                    Reason for Cancellation (Optional)
+                                                </label>
+                                                <textarea
+                                                    value={refundReason}
+                                                    onChange={(e) => {
+                                                        setRefundReason(e.target.value);
+                                                        setRefundMessage(e.target.value);
+                                                    }}
+                                                    placeholder="Tell us what didn't fit, so we can improve..."
+                                                    className="w-full h-24 p-3 bg-black/40 border border-white/[0.08] focus:border-red-500/50 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none transition-colors resize-none"
+                                                />
+                                            </div>
+
+                                            <label className="flex items-start gap-3 cursor-pointer select-none">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={refundCheckAck}
+                                                    onChange={(e) => setRefundCheckAck(e.target.checked)}
+                                                    className="mt-1 accent-red-500"
+                                                />
+                                                <span className="text-xs text-slate-400 leading-normal">
+                                                    I understand that used hosted credits are not refundable and that remaining monthly subscription credits will be revoked if this refund is approved.
+                                                </span>
+                                            </label>
+                                        </div>
+
+                                        <div className="flex justify-end gap-3">
+                                            <button
+                                                onClick={() => setShowRefundModal(false)}
+                                                className="px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs uppercase tracking-wider rounded-full transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={async () => {
+                                                    if (!refundCheckAck) {
+                                                        setRefundError("Please acknowledge the refund terms by checking the box.");
+                                                        return;
+                                                    }
+                                                    setSubmittingRefund(true);
+                                                    setRefundError(null);
+                                                    try {
+                                                        const { data, error } = await supabase.functions.invoke('request-refund-review', {
+                                                            body: {
+                                                                reason: refundReason,
+                                                                customer_message: refundMessage
+                                                            }
+                                                        });
+                                                        if (error) {
+                                                            let errMsg = error.message || "Failed to submit request.";
+                                                            try {
+                                                                if (error.context && typeof error.context.json === 'function') {
+                                                                    const body = await error.context.json();
+                                                                    errMsg = body.message || body.error || errMsg;
+                                                                }
+                                                            } catch {}
+                                                            throw new Error(errMsg);
+                                                        }
+                                                        setRefundSuccessMsg(data?.message || "Refund request submitted successfully.");
+                                                        setShowRefundModal(false);
+                                                        await loadDashboard(); // refresh data & reload state
+                                                    } catch (err: any) {
+                                                        setRefundError(err.message || "Failed to request refund review.");
+                                                    } finally {
+                                                        setSubmittingRefund(false);
+                                                    }
+                                                }}
+                                                disabled={submittingRefund}
+                                                className="px-6 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-xs uppercase tracking-wider rounded-full transition-all flex items-center gap-2"
+                                            >
+                                                {submittingRefund && <Loader2 size={14} className="animate-spin" />}
+                                                Submit Request
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             )}
 
                             {/* Overview Cards */}
@@ -935,6 +1130,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     <p className="text-xs text-nano-text mt-2">Currently active plans</p>
                                 </div>
                             </div>
+
+
 
                             {/* Dual Ownership Banner — show when user has both Hosted + BYOK */}
                             {(subStatus?.hasStarter || subStatus?.hasPro) && (byokStatus?.hasIndie || byokStatus?.hasAgency) && (
@@ -1114,6 +1311,137 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 </div>
                             )}
 
+                            {/* Billing & Refunds Section */}
+                            <div id="billing-refunds" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                <h3 className="text-lg font-bold mb-4 font-display text-white">Billing & Refunds</h3>
+
+                                {refundError ? (
+                                    <div className="p-4 border border-red-500/20 bg-red-950/20 rounded-sm text-sm text-red-400">
+                                        <p className="font-semibold">Refund status could not be loaded. Please refresh or contact support.</p>
+                                    </div>
+                                ) : fetchingRefunds ? (
+                                    <div className="flex items-center gap-3 py-4 text-sm text-nano-text/75">
+                                        <Loader2 className="animate-spin text-nano-yellow" size={16} />
+                                        <span>Checking refund eligibility...</span>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Refund reviews history/status tracker */}
+                                        {refundReviews.length > 0 && (
+                                            <div className="mb-6">
+                                                <h4 className="text-sm font-bold text-white mb-3">Refund Request Status</h4>
+                                                <div className="space-y-4">
+                                                    {refundReviews.map((rev) => (
+                                                        <div key={rev.id} className="p-4 bg-black/30 border border-nano-border/50 text-sm rounded-sm">
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <div>
+                                                                    <strong className="text-white block capitalize font-display">{rev.plan_key} Subscription Refund</strong>
+                                                                    <span className="text-xs text-nano-text/60">Requested on {new Date(rev.created_at).toLocaleDateString()}</span>
+                                                                </div>
+                                                                <span className={`text-[10px] px-2 py-0.5 rounded-sm uppercase tracking-wide border ${
+                                                                    rev.status === 'pending' ? 'bg-amber-950/40 text-amber-400 border-amber-500/30' :
+                                                                    rev.status === 'approved' || rev.status === 'refunded' ? 'bg-green-950/40 text-green-400 border-green-500/30' :
+                                                                    'bg-red-950/40 text-red-400 border-red-500/30'
+                                                                }`}>
+                                                                    {rev.status}
+                                                                </span>
+                                                            </div>
+                                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 pt-3 border-t border-nano-border/30 text-xs">
+                                                                <div>
+                                                                    <span className="text-nano-text/60 block">Credits Used</span>
+                                                                    <span className="text-white font-medium">{rev.credits_used}</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-nano-text/60 block">Used Credit Cost</span>
+                                                                    <span className="text-white font-medium">${(rev.used_credit_cost_cents / 100).toFixed(2)}</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-nano-text/60 block">Credits to Revoke</span>
+                                                                    <span className="text-white font-medium">{rev.remaining_credits_to_revoke ?? 0}</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-nano-text/60 block">Refund Estimate</span>
+                                                                    <span className="text-nano-yellow font-bold">${(rev.refundable_amount_cents / 100).toFixed(2)}</span>
+                                                                </div>
+                                                            </div>
+                                                            {rev.reason && (
+                                                                <div className="mt-3 text-xs text-nano-text bg-black/20 p-2 rounded-sm leading-relaxed">
+                                                                    <strong>Reason:</strong> {rev.reason}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* State logic for hosted subscription eligibility */}
+                                        {(() => {
+                                            const activeHostedSub = subscriptions?.find(s => s.status === 'active' && ['starter', 'pro'].includes(resolveSubKey(s)));
+                                            const activeReviewExists = refundReviews.some(r => ['pending', 'approved', 'refunded'].includes(r.status));
+
+                                            if (!activeHostedSub) {
+                                                // If there are no existing refund reviews, show the No Hosted Sub message
+                                                if (refundReviews.length === 0) {
+                                                    return (
+                                                        <div className="text-sm text-nano-text leading-relaxed">
+                                                            Refund reviews are available for hosted subscription plans. BYOK licenses and delivered credit packs are handled under their own purchase terms.
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            }
+
+                                            // If there is an active review already in progress/complete, don't show the request button or ineligible message
+                                            if (activeReviewExists) {
+                                                return null;
+                                            }
+
+                                            const createdTime = activeHostedSub.created_at ? new Date(activeHostedSub.created_at).getTime() : 0;
+                                            const isWithin7Days = createdTime > 0 ? (Date.now() - createdTime) <= 7 * 24 * 60 * 60 * 1000 : false;
+
+                                            if (isWithin7Days && !activeHostedSub.canceled_at) {
+                                                return (
+                                                    <div className="mt-4 pt-4 border-t border-nano-border/30">
+                                                        <div className="p-4 border border-nano-yellow/20 bg-nano-yellow/[0.03] rounded-sm mb-4">
+                                                            <h4 className="text-sm font-bold text-nano-yellow mb-1 font-display">7-Day Fit Guarantee Active</h4>
+                                                            <p className="text-xs text-nano-text leading-relaxed">
+                                                                You are within the 7-day satisfaction window. If the service isn't a fit, you can cancel your plan and request a refund review. Used credits will be deducted from your refund.
+                                                            </p>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => {
+                                                                setRefundError(null);
+                                                                setRefundSuccessMsg(null);
+                                                                setRefundCheckAck(false);
+                                                                setRefundReason('');
+                                                                setRefundMessage('');
+                                                                setShowRefundModal(true);
+                                                            }}
+                                                            className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-sm uppercase tracking-wide transition-all rounded-sm font-display"
+                                                        >
+                                                            Cancel Plan and Request Fit Guarantee Refund
+                                                        </button>
+                                                        <p className="text-xs text-nano-text/60 mt-3 leading-relaxed">
+                                                            Used hosted credits are not refundable and will be deducted from your estimated refund.
+                                                        </p>
+                                                    </div>
+                                                );
+                                            } else {
+                                                return (
+                                                    <div className="p-4 border border-nano-border/50 bg-black/10 rounded-sm text-sm text-nano-text leading-relaxed">
+                                                        <strong className="text-white block mb-1">No active Fit Guarantee refund window is available for this subscription.</strong>
+                                                        <p className="text-xs">
+                                                            The 7-Day Fit Guarantee applies to the first 7 days after the initial hosted subscription purchase. You can still manage or cancel your subscription from the subscription management section above.
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+                                        })()}
+                                    </>
+                                )}
+                            </div>
+
                             {/* BYOK Desktop License Section */}
                             {byokStatus && (
                                 <div id="byok-license" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
@@ -1126,8 +1454,10 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     <div className="text-white font-medium">Active</div>
                                                 </div>
                                                 <div>
-                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Device Activations</div>
-                                                    <div className="text-white font-medium">3</div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Devices</div>
+                                                    <div className="text-white font-medium">
+                                                        {deviceActivations.filter(d => d.license_id === byokStatus.agencyLicense?.id && d.status === 'active').length} of {getActivationLimit(byokStatus.agencyLicense)} activated
+                                                    </div>
                                                 </div>
                                                 <div className="col-span-2">
                                                     <div className="text-xs text-nano-text uppercase tracking-wide mb-1">
@@ -1160,8 +1490,10 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     <div className="text-white font-medium">Active</div>
                                                 </div>
                                                 <div>
-                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Device Activations</div>
-                                                    <div className="text-white font-medium">1</div>
+                                                    <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Devices</div>
+                                                    <div className="text-white font-medium">
+                                                        {deviceActivations.filter(d => d.license_id === byokStatus.indieLicense?.id && d.status === 'active').length} of {getActivationLimit(byokStatus.indieLicense)} activated
+                                                    </div>
                                                 </div>
                                                 <div className="col-span-2">
                                                     <div className="text-xs text-nano-text uppercase tracking-wide mb-1">
@@ -1266,119 +1598,114 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                             )}
 
                             {/* Activated Devices Section — only visible when at least one active BYOK license exists */}
-                            {(byokStatus?.hasIndie || byokStatus?.hasAgency) && (
-                            <div id="activated-devices" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-lg font-bold">Activated Devices</h3>
-                                    {deviceActivations.filter(d => d.status === 'active').length > 0 && (
-                                        <span className="text-xs text-nano-text">
-                                            {deviceActivations.filter(d => d.status === 'active').length} of {deviceLimit} slots used
-                                        </span>
-                                    )}
-                                </div>
-
-                                {/* Usage Bar */}
-                                {deviceActivations.filter(d => d.status === 'active').length > 0 && (
-                                    <div className="mb-5">
-                                        <div className="w-full h-1.5 bg-nano-border/50 rounded-full overflow-hidden">
-                                            <div
-                                                className={`h-full rounded-full transition-all duration-500 ${
-                                                    deviceActivations.filter(d => d.status === 'active').length >= deviceLimit
-                                                        ? 'bg-red-400'
-                                                        : 'bg-nano-yellow'
-                                                }`}
-                                                style={{ width: `${Math.min(100, (deviceActivations.filter(d => d.status === 'active').length / deviceLimit) * 100)}%` }}
-                                            />
+                            {(byokStatus?.hasIndie || byokStatus?.hasAgency) && (() => {
+                                const activeLic = byokStatus?.agencyLicense || byokStatus?.indieLicense;
+                                const limit = getActivationLimit(activeLic);
+                                const activeActivations = deviceActivations.filter(d => d.status === 'active' && d.license_id === activeLic?.id);
+                                return (
+                                    <div id="activated-devices" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h3 className="text-lg font-bold">Activated Devices</h3>
+                                            {activeActivations.length > 0 && (
+                                                <span className="text-xs text-nano-text">
+                                                    {activeActivations.length} of {limit} slots used
+                                                </span>
+                                            )}
                                         </div>
-                                    </div>
-                                )}
 
-                                {deviceError && (
-                                    <div className="mb-4 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
-                                        {deviceError}
-                                    </div>
-                                )}
-
-                                {deviceActivations.length === 0 ? (
-                                    <div className="text-center py-8">
-                                        <Monitor size={32} className="mx-auto text-nano-text/40 mb-3" />
-                                        <p className="text-sm text-nano-text">
-                                            No devices activated yet. Open Cast Director Studio on your desktop to activate.
-                                        </p>
-                                        <p className="text-xs text-nano-text/60 mt-2">
-                                            You can activate up to {deviceLimit} device{deviceLimit !== 1 ? 's' : ''} with your current license.
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {deviceActivations.map((device) => {
-                                            const isActive = device.status === 'active';
-                                            const platformIcon = device.platform?.toLowerCase().includes('mac')
-                                                ? <Laptop size={16} className="flex-shrink-0" />
-                                                : device.platform?.toLowerCase().includes('mobile') || device.platform?.toLowerCase().includes('android') || device.platform?.toLowerCase().includes('ios')
-                                                    ? <Smartphone size={16} className="flex-shrink-0" />
-                                                    : <Monitor size={16} className="flex-shrink-0" />;
-
-                                            return (
-                                                <div
-                                                    key={device.id}
-                                                    className={`p-4 border text-sm flex items-start gap-4 ${
-                                                        isActive
-                                                            ? 'bg-black/30 border-nano-border/50'
-                                                            : 'bg-black/10 border-nano-border/20 opacity-50'
-                                                    }`}
-                                                >
-                                                    <div className={`mt-0.5 ${isActive ? 'text-nano-yellow' : 'text-nano-text/40'}`}>
-                                                        {platformIcon}
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <span className="text-white font-medium truncate">
-                                                                {device.device_label || 'Unknown Device'}
-                                                            </span>
-                                                            {isActive ? (
-                                                                <span className="text-[9px] bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded-sm uppercase tracking-wide border border-green-500/30 flex-shrink-0">
-                                                                    Active
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-[9px] bg-white/5 text-nano-text/60 px-1.5 py-0.5 rounded-sm uppercase tracking-wide border border-nano-border/20 flex-shrink-0">
-                                                                    Deactivated
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-nano-text">
-                                                            <div>Platform: <span className="text-white/70 capitalize">{device.platform || 'Unknown'}</span></div>
-                                                            {device.app_version && (
-                                                                <div>Version: <span className="text-white/70">{device.app_version}</span></div>
-                                                            )}
-                                                            <div>Activated: <span className="text-white/70">{new Date(device.first_activated_at).toLocaleDateString()}</span></div>
-                                                            <div>Last seen: <span className="text-white/70">{new Date(device.last_seen_at).toLocaleDateString()}</span></div>
-                                                        </div>
-                                                    </div>
-                                                    {isActive && (
-                                                        <button
-                                                            onClick={() => handleDeactivateDevice(device.id)}
-                                                            disabled={deactivatingDeviceId === device.id}
-                                                            className="flex-shrink-0 p-2 text-nano-text/60 hover:text-red-400 hover:bg-red-500/10 transition-all rounded-sm disabled:opacity-50"
-                                                            title="Deactivate this device"
-                                                        >
-                                                            {deactivatingDeviceId === device.id
-                                                                ? <Loader2 size={14} className="animate-spin" />
-                                                                : <X size={14} />
-                                                            }
-                                                        </button>
-                                                    )}
+                                        {/* Usage Bar */}
+                                        {activeActivations.length > 0 && (
+                                            <div className="mb-5">
+                                                <div className="w-full h-1.5 bg-nano-border/50 rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all duration-500 ${
+                                                            activeActivations.length >= limit
+                                                                ? 'bg-red-400'
+                                                                : 'bg-nano-yellow'
+                                                        }`}
+                                                        style={{ width: `${Math.min(100, (activeActivations.length / limit) * 100)}%` }}
+                                                    />
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                            </div>
+                                        )}
 
-                                <p className="text-[11px] text-nano-text/50 mt-4">
-                                    Need to move to a new device? Deactivate an existing one first, then open the app on your new device.
-                                </p>
-                            </div>
-                            )}
+                                        {deviceError && (
+                                            <div className="mb-4 p-3 border border-red-500/50 bg-red-900/20 text-red-200 text-sm rounded-sm">
+                                                {deviceError}
+                                            </div>
+                                        )}
+
+                                        {activeActivations.length === 0 ? (
+                                            <div className="text-center py-8">
+                                                <Monitor size={32} className="mx-auto text-nano-text/40 mb-3" />
+                                                <p className="text-sm text-nano-text">
+                                                    No devices activated yet. Open Cast Director Studio on your desktop to activate.
+                                                </p>
+                                                <p className="text-xs text-nano-text/60 mt-2">
+                                                    You can activate up to {limit} device{limit !== 1 ? 's' : ''} with your current license.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {activeActivations.map((device) => {
+                                                    const platformIcon = device.platform?.toLowerCase().includes('mac')
+                                                        ? <Laptop size={16} className="flex-shrink-0" />
+                                                        : device.platform?.toLowerCase().includes('mobile') || device.platform?.toLowerCase().includes('android') || device.platform?.toLowerCase().includes('ios')
+                                                            ? <Smartphone size={16} className="flex-shrink-0" />
+                                                            : <Monitor size={16} className="flex-shrink-0" />;
+
+                                                    return (
+                                                        <div
+                                                            key={device.id}
+                                                            className="p-4 border text-sm flex items-start gap-4 bg-black/30 border-nano-border/50"
+                                                        >
+                                                            <div className="mt-0.5 text-nano-yellow">
+                                                                {platformIcon}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <span className="text-white font-medium truncate">
+                                                                        {device.device_label || 'Unknown Device'}
+                                                                    </span>
+                                                                    <span className="text-[9px] bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded-sm uppercase tracking-wide border border-green-500/30 flex-shrink-0">
+                                                                        Active
+                                                                    </span>
+                                                                </div>
+                                                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-nano-text">
+                                                                    <div>Platform: <span className="text-white/70 capitalize">{device.platform || 'Unknown'}</span></div>
+                                                                    {device.app_version && (
+                                                                        <div>Version: <span className="text-white/70">{device.app_version}</span></div>
+                                                                    )}
+                                                                    <div>Activated: <span className="text-white/70">{device.first_activated_at ? new Date(device.first_activated_at).toLocaleDateString() : 'Unknown'}</span></div>
+                                                                    <div>Last seen: <span className="text-white/70">{device.last_seen_at ? new Date(device.last_seen_at).toLocaleDateString() : 'Unknown'}</span></div>
+                                                                    {device.device_fingerprint && (
+                                                                        <div className="col-span-2">Fingerprint Suffix: <span className="text-white/70 font-mono">...{device.device_fingerprint.slice(-8)}</span></div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => handleDeactivateDevice(device.id)}
+                                                                disabled={deactivatingDeviceId === device.id}
+                                                                className="flex-shrink-0 p-2 text-nano-text/60 hover:text-red-400 hover:bg-red-500/10 transition-all rounded-sm disabled:opacity-50"
+                                                                title="Deactivate this device"
+                                                            >
+                                                                {deactivatingDeviceId === device.id
+                                                                    ? <Loader2 size={14} className="animate-spin" />
+                                                                    : <X size={14} />
+                                                                }
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+
+                                        <p className="text-[11px] text-nano-text/50 mt-4">
+                                            Need to move to a new device? Deactivate an existing one first, then open the app on your new device.
+                                        </p>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="grid lg:grid-cols-2 gap-8">
                                 {/* Left Column: Purchases & Subs */}
