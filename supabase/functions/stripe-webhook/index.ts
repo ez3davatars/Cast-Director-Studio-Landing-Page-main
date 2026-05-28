@@ -1,7 +1,7 @@
-// @ts-nocheck
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import Stripe from "https://esm.sh/stripe@14.14.0";
+// @ts-nocheck: Supabase Edge Function uses external runtime SDK types validated at deployment/runtime.
+import { serve } from "std/http/server";
+import { createClient } from "@supabase/supabase-js";
+import Stripe from "stripe";
 import { MONTHLY_CREDITS, CREDIT_PACK_AMOUNTS } from "../_shared/creditCosts.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
@@ -163,8 +163,8 @@ serve(async (req: Request) => {
 
       // 3. PRODUCT CATALOG RESOLUTION (GATED EARLY)
       let priceId = null;
-      let amountPaid = dataObject.amount_total || dataObject.amount_paid || 0;
-      let currency = dataObject.currency || 'usd';
+      const amountPaid = dataObject.amount_total || dataObject.amount_paid || 0;
+      const currency = dataObject.currency || 'usd';
 
       if (isSession) {
           const lineItems = await stripe.checkout.sessions.listLineItems(stripeSessionId);
@@ -311,7 +311,7 @@ serve(async (req: Request) => {
           
           const newLicenseKey = `CDS_LIC_${crypto.randomUUID().toUpperCase().replace(/-/g, '')}`;
 
-          const { data: newLicense, error: licErr } = await supabaseAdmin.from('licenses').insert([{
+          const { data: _newLicense, error: licErr } = await supabaseAdmin.from('licenses').insert([{
               user_id: userId,
               order_id: newOrder.id,
               order_item_id: newOrderItem?.id,

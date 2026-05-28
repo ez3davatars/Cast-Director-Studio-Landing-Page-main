@@ -59,3 +59,6 @@ verify_jwt = false
 
 [functions.get-my-desktop-licenses]
 verify_jwt = false
+
+[functions.refresh-download-link]
+verify_jwt = false

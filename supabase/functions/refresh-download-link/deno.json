@@ -2,9 +2,7 @@
   "imports": {
     "std/http/server": "https://deno.land/std@0.177.0/http/server.ts",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.45.4",
-    "stripe": "https://esm.sh/stripe@14.14.0",
-    "@aws-sdk/client-s3": "https://esm.sh/@aws-sdk/client-s3@3.540.0",
-    "@aws-sdk/s3-request-presigner": "https://esm.sh/@aws-sdk/s3-request-presigner@3.540.0"
+    "stripe": "https://esm.sh/stripe@14.14.0"
   },
   "lint": {
     "rules": {

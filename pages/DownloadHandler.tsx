@@ -10,6 +10,7 @@ const DownloadHandler = () => {
     const [status, setStatus] = useState<'validating' | 'success' | 'error'>('validating');
     const [errorCode, setErrorCode] = useState<string | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [filename, setFilename] = useState<string | null>(null);
 
     useEffect(() => {
         let mounted = true;
@@ -47,10 +48,14 @@ const DownloadHandler = () => {
                     return;
                 }
 
-                if (data?.targetUrl) {
+                const targetUrl = data?.targetUrl || data?.url;
+                if (targetUrl) {
+                    if (mounted) {
+                        setFilename(data.filename || null);
+                    }
                     setStatus('success');
                     // Direct hard redirect to the Cloudflare R2 presigned streaming URL
-                    window.location.href = data.targetUrl;
+                    window.location.href = targetUrl;
                 } else {
                     setStatus('error');
                     setErrorCode('unknown');
@@ -88,13 +93,57 @@ const DownloadHandler = () => {
         }
 
         if (status === 'success') {
+            const isWindows = !filename || filename.toLowerCase().endsWith('.exe') || filename.toLowerCase().includes('win');
             return (
-                <div className="flex flex-col items-center justify-center space-y-6">
+                <div className="flex flex-col items-center justify-center space-y-6 max-w-xl mx-auto">
                     <DownloadCloud className="w-16 h-16 text-green-500 animate-pulse" />
                     <h2 className="text-2xl font-bold tracking-tight text-white">Download Initiated</h2>
                     <p className="text-nano-text text-sm max-w-md text-center">
                         If your download does not start automatically, please check your network connection or contact support.
                     </p>
+
+                    {isWindows && (
+                        <div className="w-full text-left p-5 border border-amber-500/20 bg-amber-500/5 rounded-sm text-xs text-nano-text/90 space-y-3 mt-6">
+                            <h4 className="font-bold text-amber-400 flex items-center gap-1.5 text-sm">
+                                <AlertTriangle size={14} className="text-amber-400 flex-shrink-0" />
+                                Windows SmartScreen Notice
+                            </h4>
+                            <p className="leading-relaxed">
+                                Because Cast Director Studio is a new desktop application, Windows may show a “Windows protected your PC” message the first time you open the installer.
+                            </p>
+                            <p className="leading-relaxed">
+                                This can happen with new apps that have not yet built Microsoft SmartScreen reputation. If you downloaded Cast Director Studio from your official account dashboard at castdirectorstudio.com, this is expected.
+                            </p>
+                            <p className="leading-relaxed font-medium text-white/95">
+                                To continue, click <span className="underline font-semibold">More info</span>, then <span className="underline font-semibold">Run anyway</span>.
+                            </p>
+                            <div className="pt-1">
+                                <span className="font-semibold text-white/95 block mb-1">Only run the installer if:</span>
+                                <ul className="list-disc pl-4 space-y-1 text-nano-text/80">
+                                    <li>You downloaded it from your Cast Director Studio account dashboard.</li>
+                                    <li>The file name is <span className="font-mono text-white/90">Cast-Director-Studio-Setup-1.0.0.exe</span>.</li>
+                                    <li>The download source is <span className="font-medium text-white/90">Cast Director Studio / EZ3D Avatars</span>.</li>
+                                </ul>
+                            </div>
+                            <p className="text-[10px] text-nano-text/60 leading-relaxed pt-1">
+                                We are working toward Microsoft code signing and reputation improvements to reduce this warning in future releases.
+                            </p>
+
+                            <div className="pt-3 border-t border-amber-500/10">
+                                <details className="group cursor-pointer select-none">
+                                    <summary className="text-nano-text/50 hover:text-white transition-colors list-none flex items-center gap-1">
+                                        <span className="transition-transform group-open:rotate-90">▶</span>
+                                        <span>View SHA-256 Hash Verification</span>
+                                    </summary>
+                                    <div className="mt-2 pl-4 pr-2 py-2 bg-black/40 border border-nano-border/40 font-mono text-[10px] text-nano-yellow select-all break-all rounded-sm">
+                                        <span className="text-nano-text/60 block text-[9px] uppercase tracking-wider mb-0.5">SHA-256 Hash</span>
+                                        564E67B79F95B2B6558EB46ABE66C088458B93E8ABAE6F76229F2BC732A041AD
+                                    </div>
+                                </details>
+                            </div>
+                        </div>
+                    )}
+
                     <Link to="/account" className="mt-8 px-8 py-3 bg-white/10 hover:bg-white/20 text-white transition-colors text-sm uppercase tracking-wide border border-white/20">
                         Return to Dashboard
                     </Link>

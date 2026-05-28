@@ -1,7 +1,7 @@
-// @ts-nocheck
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import Stripe from "https://esm.sh/stripe@14.14.0";
+// @ts-nocheck: Supabase Edge Function uses external runtime SDK types validated at deployment/runtime.
+import { serve } from "std/http/server";
+import { createClient } from "@supabase/supabase-js";
+import Stripe from "stripe";
 
 // ──────────────────────────────────────────────────
 // Stripe + CORS
@@ -479,7 +479,9 @@ serve(async (req: Request) => {
         // Can't re-read body, but we can extract from error context
         productKey = err._productKey || "unknown";
         mode = err._mode || "unknown";
-      } catch {}
+      } catch (_) {
+        // Best-effort cleanup only; failure is non-blocking.
+      }
 
       console.error("[Checkout] Stripe error:", {
         stripeCode,

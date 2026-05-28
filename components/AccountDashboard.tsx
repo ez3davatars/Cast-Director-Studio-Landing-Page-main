@@ -5,7 +5,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
-import { Loader2, Info, MessageSquare, LifeBuoy, Monitor, Smartphone, Laptop, X } from 'lucide-react';
+import { Loader2, Info, MessageSquare, LifeBuoy, Monitor, Smartphone, Laptop, X, AlertTriangle } from 'lucide-react';
 
 interface DeviceActivation {
     id: string;
@@ -86,6 +86,8 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
     // Download state
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
+    const [refreshingId, setRefreshingId] = useState<string | null>(null);
+    const [refreshErrors, setRefreshErrors] = useState<Record<string, string>>({});
 
     // Billing Portal state
     const [portalLoading, setPortalLoading] = useState(false);
@@ -145,7 +147,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         try {
             setDownloadingId(downloadId);
             const { data, error } = await invokeAuthenticatedFunction('generate-download', { download_id: downloadId });
-            
+
             if (error || !data || !data.url) {
                 console.error("Download generation failed:", error || data?.error);
                 alert(`Failed to generate download: ${data?.message || data?.error || 'Unknown error'}`);
@@ -160,6 +162,47 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             setDownloadingId(null);
         }
     };
+
+    const handleRefreshDownloadLink = useCallback(async (downloadId: string) => {
+        setRefreshingId(downloadId);
+        setRefreshErrors((prev) => {
+            const next = { ...prev };
+            delete next[downloadId];
+            return next;
+        });
+
+        try {
+            const { data, error } = await invokeAuthenticatedFunction('refresh-download-link', { download_id: downloadId });
+
+            if (error || !data || !data.success) {
+                console.error("Download refresh failed:", error || data?.error);
+                throw new Error(data?.message || data?.error || 'Could not refresh download link. Please contact support.');
+            }
+
+            // Update the local downloads/dashboard state with the refreshed expiresAt and availability
+            setDownloads((prev) => {
+                if (!prev) return prev;
+                return prev.map((dl) => {
+                    if (dl.id === downloadId) {
+                        return {
+                            ...dl,
+                            expiresAt: data.expiresAt,
+                            isAvailable: true,
+                        };
+                    }
+                    return dl;
+                });
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Could not refresh download link. Please contact support.';
+            setRefreshErrors((prev) => ({
+                ...prev,
+                [downloadId]: message,
+            }));
+        } finally {
+            setRefreshingId(null);
+        }
+    }, [setDownloads]);
 
     const isExpiringOrExpired = (date: Date | null): boolean => {
         if (!date) return false;
@@ -268,7 +311,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 let source = 'fallback';
                 let reason = '';
 
-                // 1. Primary explicit name 
+                // 1. Primary explicit name
                 if (primaryName) {
                     name = primaryName;
                     source = type === 'order' ? 'order_snapshot' : (type === 'license' ? 'license_name' : 'download_name');
@@ -836,6 +879,97 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             setPortalLoading(false);
         }
     };
+
+    const dedupedDownloads = (() => {
+        if (!downloads) return null;
+
+        const safeDownloads = Array.isArray(downloads) ? downloads : [];
+
+        const isWindowsInstallerDownload = (download: DownloadViewModel) => {
+            const platform = String(download?.platform ?? '').toLowerCase();
+            const fileType = String(download?.fileType ?? (download as any).file_type ?? '').toLowerCase();
+            const productName = String(download?.productName ?? (download as any).product_name ?? '').toLowerCase();
+            const installerPlatform = String((download as any).installer_platform ?? '').toLowerCase();
+
+            return (
+                platform.includes('windows') ||
+                platform.includes('win') ||
+                installerPlatform.includes('windows') ||
+                fileType.includes('exe') ||
+                fileType.includes('installer') ||
+                productName.includes('windows')
+            );
+        };
+
+        const isExpiredDownload = (download: DownloadViewModel) => {
+            const expiresAt = download?.expiresAt || (download as any).expires_at;
+            return expiresAt ? new Date(expiresAt).getTime() <= Date.now() : true;
+        };
+
+        // Separate Windows installers from others
+        const windowsDownloads = safeDownloads.filter(isWindowsInstallerDownload);
+        const otherDownloads = safeDownloads.filter(dl => !isWindowsInstallerDownload(dl));
+
+        const result: DownloadViewModel[] = [];
+
+        if (windowsDownloads.length > 0) {
+            const bestWindowsDownload = [...windowsDownloads].sort((a, b) => {
+                const aExpired = !a.isAvailable || isExpiredDownload(a);
+                const bExpired = !b.isAvailable || isExpiredDownload(b);
+
+                if (aExpired !== bExpired) return aExpired ? 1 : -1;
+
+                const aHasStorage = Boolean((a as any).storage_path || (a as any).storagePath);
+                const bHasStorage = Boolean((b as any).storage_path || (b as any).storagePath);
+                if (aHasStorage !== bHasStorage) return aHasStorage ? -1 : 1;
+
+                const aHasSize = Boolean((a as any).file_size_bytes || (a as any).fileSizeBytes);
+                const bHasSize = Boolean((b as any).file_size_bytes || (b as any).fileSizeBytes);
+                if (aHasSize !== bHasSize) return aHasSize ? -1 : 1;
+
+                const dateA = a.expiresAt || (a as any).expires_at || '';
+                const dateB = b.expiresAt || (b as any).expires_at || '';
+                const timeA = dateA ? new Date(dateA).getTime() : 0;
+                const timeB = dateB ? new Date(dateB).getTime() : 0;
+                return timeB - timeA;
+            })[0];
+
+            if (bestWindowsDownload) {
+                result.push(bestWindowsDownload);
+            }
+        }
+
+        // Deduplicate non-Windows downloads by installer_id or key
+        const otherGroups: Record<string, DownloadViewModel[]> = {};
+        otherDownloads.forEach((dl) => {
+            const installerId = (dl as any).installer_id || (dl as any).installerId || '';
+            const groupKey = installerId || `${String(dl.platform ?? '').toLowerCase()}-${String(dl.version ?? '').toLowerCase()}-${String(dl.fileType ?? '').toLowerCase()}`;
+
+            if (!otherGroups[groupKey]) {
+                otherGroups[groupKey] = [];
+            }
+            otherGroups[groupKey].push(dl);
+        });
+
+        Object.values(otherGroups).forEach((group) => {
+            const bestOther = group.sort((a, b) => {
+                if (a.isAvailable && !b.isAvailable) return -1;
+                if (!a.isAvailable && b.isAvailable) return 1;
+
+                const dateA = a.expiresAt || (a as any).expires_at || '';
+                const dateB = b.expiresAt || (b as any).expires_at || '';
+                const timeA = dateA ? new Date(dateA).getTime() : 0;
+                const timeB = dateB ? new Date(dateB).getTime() : 0;
+                return timeB - timeA;
+            })[0];
+
+            if (bestOther) {
+                result.push(bestOther);
+            }
+        });
+
+        return result;
+    })();
 
     return (
         <section id="account-dashboard" className="py-20 border-t border-nano-border bg-black/20 min-h-[60vh]">
@@ -1849,13 +1983,47 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                     {/* Downloads List */}
                                     <div className="rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                         <h3 className="text-xl font-bold mb-6">Software Downloads</h3>
+
+                                        {dedupedDownloads && dedupedDownloads.length > 0 && dedupedDownloads.some(dl =>
+                                            String(dl.platform ?? '').toLowerCase().includes('windows') ||
+                                            String(dl.platform ?? '').toLowerCase().includes('win') ||
+                                            String(dl.fileType ?? '').toLowerCase().includes('exe') ||
+                                            String(dl.productName ?? '').toLowerCase().includes('windows')
+                                        ) && (
+                                            <div className="mb-6 p-4 border border-amber-500/20 bg-amber-500/5 rounded-sm text-xs text-nano-text/90 space-y-2 max-w-xl">
+                                                <h4 className="font-bold text-amber-400 flex items-center gap-1.5 text-sm">
+                                                    <AlertTriangle size={14} className="text-amber-400 flex-shrink-0" />
+                                                    Windows SmartScreen Notice
+                                                </h4>
+                                                <p className="leading-relaxed">
+                                                    Windows may show a “Windows protected your PC” warning because Cast Director Studio is a new desktop app and is still building Microsoft SmartScreen reputation.
+                                                </p>
+                                                <p className="leading-relaxed">
+                                                    If you downloaded the installer from your official Cast Director Studio account dashboard, this is expected. To continue, click <span className="underline font-semibold">More info</span>, then <span className="underline font-semibold">Run anyway</span>.
+                                                </p>
+                                                <p className="leading-relaxed font-semibold text-white/95">
+                                                    Only run installers downloaded from your account dashboard at castdirectorstudio.com.
+                                                </p>
+                                                <details className="mt-3 group cursor-pointer text-xs select-none pt-2 border-t border-amber-500/10">
+                                                    <summary className="text-nano-text/50 hover:text-white transition-colors list-none flex items-center gap-1">
+                                                        <span className="transition-transform group-open:rotate-90">▶</span>
+                                                        <span>View SHA-256 Hash Verification</span>
+                                                    </summary>
+                                                    <div className="mt-2 pl-4 pr-2 py-2 bg-black/40 border border-nano-border/40 font-mono text-[10px] text-nano-yellow select-all break-all rounded-sm">
+                                                        <span className="text-nano-text/60 block text-[9px] uppercase tracking-wider mb-0.5">SHA-256 Hash</span>
+                                                        564E67B79F95B2B6558EB46ABE66C088458B93E8ABAE6F76229F2BC732A041AD
+                                                    </div>
+                                                </details>
+                                            </div>
+                                        )}
+
                                         {!downloads ? (
                                             <p className="text-nano-text text-sm italic">Download server is currently unreachable.</p>
-                                        ) : downloads.length === 0 ? (
+                                        ) : dedupedDownloads.length === 0 ? (
                                             <p className="text-nano-text text-sm">No downloads available yet.</p>
                                         ) : (
                                             <div className="space-y-4">
-                                                {downloads.map((dl, idx) => (
+                                                {dedupedDownloads.map((dl, idx) => (
                                                     <div key={dl.id || idx} className="p-4 bg-black/30 border border-nano-border/50 text-sm">
                                                         <div className="flex justify-between items-start mb-2">
                                                             <strong className="text-white block text-base">{dl.productName}</strong>
@@ -1866,9 +2034,17 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                             <div>File Type: <span className="text-white">{dl.fileType}</span></div>
                                                         </div>
 
-                                                        {dl.expiresAt && (
+                                                        {dl.expiresAt && dl.isAvailable ? (
                                                             <div className="text-xs text-nano-text mb-4">
                                                                 Download link valid until {dl.expiresAt}
+                                                            </div>
+                                                        ) : (byokStatus?.hasIndie || byokStatus?.hasAgency) ? (
+                                                            <div className="text-xs text-nano-yellow mb-4">
+                                                                Download link expired. Your purchase remains active.
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-xs text-nano-text mb-4">
+                                                                Download link expired.
                                                             </div>
                                                         )}
 
@@ -1891,14 +2067,21 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                                 </button>
                                                             ) : (
                                                                 <button
-                                                                    disabled
-                                                                    className="px-4 py-2 bg-gray-600 text-gray-400 font-bold text-xs uppercase tracking-wide text-center cursor-not-allowed border border-gray-600"
+                                                                    onClick={() => handleRefreshDownloadLink(dl.id)}
+                                                                    disabled={refreshingId === dl.id}
+                                                                    className="px-4 py-2 bg-nano-yellow text-black font-bold text-xs uppercase tracking-wide text-center hover:bg-nano-gold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                                                                 >
-                                                                    Link Expired
+                                                                    {refreshingId === dl.id && <Loader2 size={14} className="animate-spin" />}
+                                                                    Generate Fresh Download Link
                                                                 </button>
                                                             )}
-                                                            {/* Generate New Link button intentionally hidden until the feature is active */}
                                                         </div>
+
+                                                        {refreshErrors[dl.id] && (
+                                                            <div className="text-xs text-red-400 mt-3">
+                                                                {refreshErrors[dl.id]}
+                                                            </div>
+                                                        )}
                                                         <div className="mt-4 pt-3 border-t border-nano-border/30 text-[10px] text-nano-text/80 leading-relaxed">
                                                             Your purchase remains active even if this download link expires.
                                                         </div>
