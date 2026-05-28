@@ -1,46 +1,53 @@
-// @ts-nocheck: Supabase Edge Function uses external runtime SDK types validated at deployment/runtime.
+// @ts-nocheck: external Deno and ESM modules
 import { serve } from "std/http/server";
 import { createClient } from "@supabase/supabase-js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 serve(async (req: Request) => {
-  // 1. Handle preflight OPTIONS
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { status: 200, headers: corsHeaders });
   }
 
   try {
-    // 2. Require authenticated user
+    // 1. Authenticate user
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "unauthorized", message: "Missing authorization header." }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "unauthorized", message: "Missing authorization header." }, 401);
     }
 
-    const token = authHeader.replace("Bearer ", "");
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
+    );
 
-    // 3. Connect using service role key internally
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      return jsonResponse({ error: "unauthorized", message: "Invalid or expired token." }, 401);
+    }
+
+    // 2. Admin client for full queries
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
-    if (userErr || !user) {
-      return new Response(
-        JSON.stringify({ error: "unauthorized", message: "Invalid authorization token." }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // 4. Query public.refund_reviews where user_id = user.id
+    // 3. Query customer-safe refund reviews where user_id = user.id
     const { data: reviews, error: queryError } = await supabaseAdmin
       .from("refund_reviews")
       .select(`
@@ -62,23 +69,14 @@ serve(async (req: Request) => {
 
     if (queryError) {
       console.error("[Refund] Error querying refund reviews:", queryError);
-      return new Response(
-        JSON.stringify({ error: "query_error", message: "Failed to retrieve refund reviews." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "query_error", message: "Failed to retrieve refund reviews." }, 500);
     }
 
-    // 5. Return customer-safe reviews JSON response
-    return new Response(
-      JSON.stringify(reviews || []),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    // 4. Return customer-safe reviews JSON response
+    return jsonResponse(reviews || []);
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("[Refund Fatal] Crash in get-my-refund-reviews:", error);
-    return new Response(
-      JSON.stringify({ error: "internal_error", message: "An unexpected architecture fault occurred." }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: "internal_error", message: "An unexpected architecture fault occurred." }, 500);
   }
 });
