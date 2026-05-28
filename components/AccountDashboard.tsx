@@ -32,6 +32,10 @@ const getActivationLimit = (license: any): number => {
   );
 };
 
+const getDownloadId = (download: any): string | null => {
+  return download?.id ?? download?.download_id ?? download?.downloadId ?? null;
+};
+
 const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     const [loading, setLoading] = useState(true);
     const [dbProducts, setDbProducts] = useState<any[]>([]);
@@ -172,7 +176,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         });
 
         try {
-            const { data, error } = await invokeAuthenticatedFunction('refresh-download-link', { download_id: downloadId });
+            const { data, error } = await invokeAuthenticatedFunction('refresh-download-link', { downloadId });
 
             if (error || !data || !data.success) {
                 console.error("Download refresh failed:", error || data?.error);
@@ -2065,16 +2069,28 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                                     {downloadingId === dl.id && <Loader2 size={14} className="animate-spin" />}
                                                                     Download Installer
                                                                 </button>
-                                                            ) : (
-                                                                <button
-                                                                    onClick={() => handleRefreshDownloadLink(dl.id)}
-                                                                    disabled={refreshingId === dl.id}
-                                                                    className="px-4 py-2 bg-nano-yellow text-black font-bold text-xs uppercase tracking-wide text-center hover:bg-nano-gold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                                                                >
-                                                                    {refreshingId === dl.id && <Loader2 size={14} className="animate-spin" />}
-                                                                    Generate Fresh Download Link
-                                                                </button>
-                                                            )}
+                                                            ) : (() => {
+                                                                const downloadId = getDownloadId(dl);
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            if (!downloadId) {
+                                                                                setRefreshErrors((prev) => ({
+                                                                                    ...prev,
+                                                                                    [dl.id || 'unknown']: 'Could not refresh download link. Please contact support.'
+                                                                                }));
+                                                                                return;
+                                                                            }
+                                                                            handleRefreshDownloadLink(downloadId);
+                                                                        }}
+                                                                        disabled={!downloadId || refreshingId === downloadId}
+                                                                        className="px-4 py-2 bg-nano-yellow text-black font-bold text-xs uppercase tracking-wide text-center hover:bg-nano-gold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                                                                    >
+                                                                        {refreshingId === downloadId && <Loader2 size={14} className="animate-spin" />}
+                                                                        Generate Fresh Download Link
+                                                                    </button>
+                                                                );
+                                                            })()}
                                                         </div>
 
                                                         {refreshErrors[dl.id] && (

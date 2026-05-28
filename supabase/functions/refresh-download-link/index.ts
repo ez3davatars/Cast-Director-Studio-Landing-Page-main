@@ -8,6 +8,13 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+const json = (data: any, status = 200) => {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+  });
+};
+
 serve(async (req: Request) => {
   // 1. Handle Preflight CORS
   if (req.method === 'OPTIONS') {
@@ -24,13 +31,10 @@ serve(async (req: Request) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { downloadId } = body;
+    const downloadId = body.downloadId ?? body.download_id ?? body.id;
 
     if (!downloadId) {
-      return new Response(
-        JSON.stringify({ error: "missing_id", message: "No download ID provided." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json({ error: "missing_id" }, 400);
     }
 
     // 2. Initialize Service Role DB Client mapped specifically for internal validations
@@ -157,17 +161,15 @@ serve(async (req: Request) => {
     }
 
     // 9. Success - Return customer-safe JSON
-    return new Response(
-      JSON.stringify({
-        downloadUrl: `/download/${downloadToken}`,
-        expiresAt: expiresAt,
-        displayName: download.display_name || "Cast Director Studio Installer",
-        platform: download.platform || "windows",
-        version: download.version || "1.0.0",
-        fileType: download.file_type || "installer"
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json({
+      success: true,
+      downloadUrl: `/download/${downloadToken}`,
+      expiresAt: expiresAt,
+      displayName: download.display_name || "Cast Director Studio Installer",
+      platform: download.platform || "windows",
+      version: download.version || "1.0.0",
+      fileType: download.file_type || "installer"
+    });
 
   } catch (error: any) {
     console.error(`[Fatal] Edge Download Refresh crashed:`, error);
