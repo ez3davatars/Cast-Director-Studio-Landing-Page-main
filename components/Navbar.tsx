@@ -50,7 +50,7 @@ const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div className="flex flex-col leading-tight">
               <span className="font-mono font-bold text-2xl tracking-tight text-white">
-                Cast Director Studio
+                Cast Director <span className="text-nano-yellow">Studio</span>
               </span>
               <span className="text-[10px] uppercase tracking-widest text-slate-400 font-medium mt-0.5">
                 Powered by Nanobanana 2

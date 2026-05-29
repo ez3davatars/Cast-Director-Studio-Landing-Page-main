@@ -15,7 +15,7 @@ const Footer: React.FC = () => {
                 </div>
                 <div className="leading-tight">
                     <div className="font-mono font-bold text-2xl tracking-tight text-white">
-                        Cast Director Studio
+                        Cast Director <span className="text-nano-yellow">Studio</span>
                     </div>
                     <div className="text-[11px] text-nano-text tracking-widest uppercase">
                         Powered by Nanobanana 2
