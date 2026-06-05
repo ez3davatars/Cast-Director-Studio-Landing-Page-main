@@ -14,8 +14,25 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-cds-ref",
 };
+
+// ──────────────────────────────────────────────────
+// Affiliate Attribution Helper
+// Reads the cds_ref cookie from the Cookie header.
+// The cookie value is an opaque session_token from
+// affiliate_clicks — it reveals nothing about the
+// affiliate. Only this token is stored in the browser.
+// ──────────────────────────────────────────────────
+
+function parseCookieValue(cookieHeader: string | null, name: string): string | null {
+  if (!cookieHeader) return null;
+  const entry = cookieHeader
+    .split(";")
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${name}=`));
+  return entry ? entry.slice(name.length + 1) : null;
+}
 
 const json = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -395,7 +412,76 @@ serve(async (req: Request) => {
       );
     }
 
-    // ── 9. Build metadata ──
+    // ── 9. Affiliate attribution — token pickup, validation, self-referral guard ──
+    //
+    // Reading priority: request body → x-cds-ref header → cds_ref cookie.
+    // The token is an opaque session_token stored in affiliate_clicks.
+    // It reveals nothing about the affiliate identity.
+    //
+    // This is a Vite + React SPA. The Edge Function runs cross-origin at
+    // *.supabase.co, so it cannot set an HttpOnly first-party cookie on the
+    // app domain. Cookies are set by the frontend after it receives the token
+    // from record-affiliate-click. We therefore read them back via the Cookie
+    // header (SameSite=Lax cookies are sent on same-site navigations and on
+    // cross-site POST/fetch when the site initiates them, so this works in
+    // practice for logged-in users on modern browsers).
+    //
+    // CRITICAL: every branch is wrapped in a single try/catch.
+    //           Attribution failure MUST NOT block or fail checkout under any
+    //           circumstance — including DB timeouts, missing rows, or schema
+    //           mismatches.
+    let affiliateSessionToken: string | null = null;
+    try {
+      const tokenFromBody   = typeof body.affiliate_session_token === "string"
+        ? body.affiliate_session_token.trim() : null;
+      const tokenFromHeader = req.headers.get("x-cds-ref")?.trim() ?? null;
+      const tokenFromCookie = parseCookieValue(req.headers.get("cookie"), "cds_ref");
+      const rawToken        = (tokenFromBody || tokenFromHeader || tokenFromCookie) ?? null;
+
+      if (rawToken && rawToken.length > 0) {
+        // ── Validate: token must exist, be unexpired, and not yet converted ──
+        const { data: clickRow } = await supabaseAdmin
+          .from("affiliate_clicks")
+          .select("id, affiliate_id, expires_at, converted")
+          .eq("session_token", rawToken)
+          .maybeSingle();
+
+        if (!clickRow) {
+          console.log("[Checkout] Affiliate token not found in affiliate_clicks — skipping.");
+        } else if (clickRow.converted) {
+          console.log("[Checkout] Affiliate token already converted — skipping.");
+        } else if (new Date(clickRow.expires_at) <= new Date()) {
+          console.log("[Checkout] Affiliate token expired — skipping.");
+        } else if (userId) {
+          // ── Self-referral guard (authenticated user) ──
+          // Check whether the logged-in buyer owns the affiliate account that
+          // generated this click. Definitive check also runs in stripe-webhook
+          // after full identity resolution, so this is belt-and-suspenders.
+          const { data: affiliateRow } = await supabaseAdmin
+            .from("affiliates")
+            .select("user_id")
+            .eq("id", clickRow.affiliate_id)
+            .maybeSingle();
+
+          if (affiliateRow?.user_id === userId) {
+            console.log("[Checkout] Self-referral detected at checkout — stripping token.");
+          } else {
+            affiliateSessionToken = rawToken;
+            console.log("[Checkout] Affiliate token valid (authenticated) — will embed in metadata.");
+          }
+        } else {
+          // Guest checkout: identity not yet known.
+          // Self-referral check runs again in stripe-webhook after resolution.
+          affiliateSessionToken = rawToken;
+          console.log("[Checkout] Affiliate token valid (guest) — will embed in metadata.");
+        }
+      }
+    } catch (affTokenErr) {
+      // Non-fatal — swallow and continue without attribution
+      console.warn("[Checkout] Affiliate token handling failed (non-fatal):", affTokenErr);
+    }
+
+    // ── 10. Build metadata ──
     const metadata: Record<string, string> = {
       product_key: productKey,
       purchase_kind: config.purchase_kind,
@@ -406,8 +492,13 @@ serve(async (req: Request) => {
     if (config.credits) metadata.credits = String(config.credits);
     if (config.monthly_credits)
       metadata.monthly_credits = String(config.monthly_credits);
+    // Affiliate token — embedded last so it never overwrites commerce fields.
+    // stripe-webhook reads this to attribute the conversion.
+    if (affiliateSessionToken) {
+      metadata.affiliate_session_token = affiliateSessionToken;
+    }
 
-    // ── 10. Build Stripe Checkout Session params ──
+    // ── 11. Build Stripe Checkout Session params ──
     const success_url =
       body.successUrl ||
       body.success_url ||
@@ -437,6 +528,8 @@ serve(async (req: Request) => {
     }
 
     // Mode-specific metadata propagation
+    // affiliate_session_token is already in `metadata` from step 9, so it flows
+    // automatically into both payment_intent_data and subscription_data here.
     if (config.mode === "payment") {
       sessionParams.payment_intent_data = { metadata };
     }
@@ -444,7 +537,7 @@ serve(async (req: Request) => {
       sessionParams.subscription_data = { metadata };
     }
 
-    // ── 11. Safe logging ──
+    // ── 12. Safe logging ──
     console.log("[Checkout] Creating session:", {
       productKey,
       mode: config.mode,
@@ -452,9 +545,10 @@ serve(async (req: Request) => {
       allowPromotionCodes: true,
       pricePrefix: priceId.slice(0, 12),
       hasUserId: Boolean(userId),
+      hasAffiliateToken: Boolean(affiliateSessionToken),
     });
 
-    // ── 12. Create Stripe Checkout Session ──
+    // ── 13. Create Stripe Checkout Session ──
     const session = await stripe.checkout.sessions.create(sessionParams);
 
     return json({
@@ -472,11 +566,9 @@ serve(async (req: Request) => {
         "Stripe checkout session creation failed";
       const stripeParam = err.param || err.raw?.param || null;
 
-      // Extract productKey from the request if possible
       let productKey = "unknown";
       let mode = "unknown";
       try {
-        // Can't re-read body, but we can extract from error context
         productKey = err._productKey || "unknown";
         mode = err._mode || "unknown";
       } catch (_) {

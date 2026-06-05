@@ -8,6 +8,392 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
   apiVersion: "2023-10-16",
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// AFFILIATE ATTRIBUTION HELPERS
+//
+// DESIGN RULES (from CLAUDE.md + implementation spec):
+//   - Runs AFTER all core fulfillment succeeds.
+//   - Every error is caught and logged — never re-thrown.
+//   - Attribution failure must never affect Stripe webhook response.
+//   - No commission on taxes, refunds, failed payments, disputes, or
+//     self-referrals.
+//   - commission_ledger rows are append-only (immutable).
+//   - Refunds create 'reversal' rows; they never modify 'earned' rows.
+//   - Idempotency: UNIQUE index on (stripe_event_id) WHERE type='earned'
+//     handles duplicate webhook delivery.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * processAffiliateAttribution
+ *
+ * Called after a successful checkout.session.completed OR invoice.paid
+ * (recurring) fulfillment. Writes to referrals + commission_ledger.
+ *
+ * For checkout sessions  → reads affiliate_session_token from Stripe metadata,
+ *                           looks up the click, creates a referral, records
+ *                           the first 'earned' commission row.
+ *
+ * For recurring invoices → finds the existing active referral for the user,
+ *                           checks commission_expires_at, records a renewal
+ *                           'earned' commission row.
+ */
+async function processAffiliateAttribution(
+  supabaseAdmin: any,
+  dataObject: any,          // Stripe session or invoice object
+  isCheckoutSession: boolean,
+  isRecurringInvoice: boolean,
+  stripeEventId: string,
+  orderId: string,
+  resolvedUserId: string | null,
+  stripeInvoiceId: string | null
+): Promise<void> {
+
+  // ── Checkout session: first payment → create referral ──────────────────────
+  if (isCheckoutSession) {
+    const affiliateSessionToken: string | undefined =
+      dataObject.metadata?.affiliate_session_token;
+
+    if (!affiliateSessionToken) {
+      console.log("[Affiliate] No affiliate_session_token in checkout metadata. Skipping.");
+      return;
+    }
+
+    // No attribution for guest checkouts (no user to link the referral to)
+    if (!resolvedUserId) {
+      console.log("[Affiliate] Guest checkout — no user ID to attribute referral. Skipping.");
+      return;
+    }
+
+    // 1. Look up the click row by session token
+    const { data: click, error: clickLookupErr } = await supabaseAdmin
+      .from("affiliate_clicks")
+      .select("id, affiliate_id, expires_at, converted")
+      .eq("session_token", affiliateSessionToken)
+      .maybeSingle();
+
+    if (clickLookupErr || !click) {
+      console.log("[Affiliate] Click not found for session token. Skipping attribution.");
+      return;
+    }
+
+    if (click.converted) {
+      console.log(`[Affiliate] Click ${click.id} already converted. Skipping duplicate.`);
+      return;
+    }
+
+    if (new Date(click.expires_at) <= new Date()) {
+      console.log(`[Affiliate] Click ${click.id} attribution window expired. Skipping.`);
+      return;
+    }
+
+    // 2. Get affiliate — must still be active at time of conversion
+    const { data: affiliate, error: affErr } = await supabaseAdmin
+      .from("affiliates")
+      .select("id, user_id, status, commission_rate, commission_duration_months, payout_hold_days")
+      .eq("id", click.affiliate_id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (affErr || !affiliate) {
+      console.log("[Affiliate] Affiliate not found or suspended at conversion time. Skipping.");
+      return;
+    }
+
+    // 3. Self-referral guard
+    if (affiliate.user_id === resolvedUserId) {
+      console.log("[Affiliate] Self-referral detected. Skipping attribution.");
+      return;
+    }
+
+    // 4. Commission amount — exclude taxes (CLAUDE.md: no commission on taxes)
+    //    amount_total is in cents (Stripe). total_details.amount_tax is also cents.
+    const amountTotalCents: number = dataObject.amount_total ?? 0;
+    const taxCents: number         = dataObject.total_details?.amount_tax ?? 0;
+    const commissionBaseCents      = Math.max(0, amountTotalCents - taxCents);
+    const commissionCents          = Math.floor(commissionBaseCents * Number(affiliate.commission_rate));
+
+    if (commissionCents <= 0) {
+      console.log("[Affiliate] Computed commission is zero (zero-amount or fully-taxed order). Skipping.");
+      return;
+    }
+
+    // 5. Compute key dates
+    const now = new Date();
+
+    const commissionExpiresAt = new Date(now);
+    commissionExpiresAt.setMonth(
+      commissionExpiresAt.getMonth() + affiliate.commission_duration_months
+    );
+
+    const holdUntil = new Date(now);
+    holdUntil.setDate(holdUntil.getDate() + affiliate.payout_hold_days);
+
+    // 6. Void any prior active referral for this user (last-click attribution)
+    //    The partial unique index referrals_active_per_user_uidx enforces at most
+    //    one active referral, so we void before inserting the new one.
+    const { error: voidErr } = await supabaseAdmin
+      .from("referrals")
+      .update({ status: "voided", updated_at: now.toISOString() })
+      .eq("referred_user_id", resolvedUserId)
+      .eq("status", "active");
+
+    if (voidErr) {
+      // Non-blocking: log and continue — the unique index will catch duplicates
+      console.warn("[Affiliate] Failed to void prior active referral (non-fatal):", voidErr);
+    }
+
+    // 7. Insert referral
+    const { data: newReferral, error: referralErr } = await supabaseAdmin
+      .from("referrals")
+      .insert([{
+        affiliate_id:          affiliate.id,
+        click_id:              click.id,
+        referred_user_id:      resolvedUserId,
+        stripe_customer_id:    dataObject.customer ?? null,
+        stripe_session_id:     dataObject.id ?? null,
+        order_id:              orderId,
+        attributed_at:         now.toISOString(),
+        commission_expires_at: commissionExpiresAt.toISOString(),
+        status:                "active",
+      }])
+      .select("id")
+      .single();
+
+    if (referralErr || !newReferral) {
+      console.error("[Affiliate] Failed to insert referral:", referralErr);
+      return;
+    }
+
+    // 8. Insert commission_ledger 'earned' row (append-only, immutable)
+    const { error: ledgerErr } = await supabaseAdmin
+      .from("commission_ledger")
+      .insert([{
+        affiliate_id:             affiliate.id,
+        referral_id:              newReferral.id,
+        order_id:                 orderId,
+        stripe_event_id:          stripeEventId,
+        stripe_payment_intent_id: dataObject.payment_intent ?? null,
+        type:                     "earned",
+        amount_cents:             commissionCents,
+        currency:                 (dataObject.currency ?? "usd").toLowerCase(),
+        hold_until:               holdUntil.toISOString(),
+      }]);
+
+    if (ledgerErr) {
+      if (ledgerErr.code === "23505") {
+        // UNIQUE violation on stripe_event_id — already recorded
+        console.log(`[Affiliate] Commission for event ${stripeEventId} already exists. Skipping.`);
+        return;
+      }
+      console.error("[Affiliate] Failed to insert commission_ledger row:", ledgerErr);
+      // Referral was created but commission row failed. Admin can manually correct.
+      return;
+    }
+
+    // 9. Mark click as converted
+    await supabaseAdmin
+      .from("affiliate_clicks")
+      .update({
+        converted:          true,
+        converted_at:       now.toISOString(),
+        attributed_user_id: resolvedUserId,
+      })
+      .eq("id", click.id);
+
+    console.log(
+      `[Affiliate] Attribution complete. ` +
+      `Affiliate: ${affiliate.id}, User: ${resolvedUserId}, ` +
+      `Commission: ${commissionCents} cents, Hold until: ${holdUntil.toISOString()}`
+    );
+    return;
+  }
+
+  // ── Recurring invoice: renewal payment → add commission row ────────────────
+  if (isRecurringInvoice) {
+    if (!resolvedUserId) {
+      console.log("[Affiliate] Recurring invoice: no resolved user. Skipping.");
+      return;
+    }
+
+    // 1. Find the active referral for this user
+    const { data: referral, error: referralLookupErr } = await supabaseAdmin
+      .from("referrals")
+      .select("id, affiliate_id, commission_expires_at")
+      .eq("referred_user_id", resolvedUserId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (referralLookupErr || !referral) {
+      console.log("[Affiliate] Recurring invoice: no active referral for user. Skipping.");
+      return;
+    }
+
+    // 2. Check commission window not expired
+    if (new Date(referral.commission_expires_at) <= new Date()) {
+      console.log("[Affiliate] Recurring invoice: commission window expired. Skipping.");
+      return;
+    }
+
+    // 3. Get affiliate — must still be active
+    const { data: affiliate, error: affErr } = await supabaseAdmin
+      .from("affiliates")
+      .select("id, commission_rate, payout_hold_days")
+      .eq("id", referral.affiliate_id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (affErr || !affiliate) {
+      console.log("[Affiliate] Recurring invoice: affiliate suspended or deleted. Skipping.");
+      return;
+    }
+
+    // 4. Commission amount (exclude tax — CLAUDE.md: no commission on taxes)
+    //    Prefer total_tax_amounts (array of { amount, taxable_amount, tax_rate })
+    //    over the legacy scalar `tax` field. Both are cents. Falls back safely
+    //    to zero if neither field is present.
+    const amountPaidCents: number = dataObject.amount_paid ?? 0;
+    let taxCents = 0;
+    if (Array.isArray(dataObject.total_tax_amounts) && dataObject.total_tax_amounts.length > 0) {
+        taxCents = dataObject.total_tax_amounts.reduce(
+            (sum: number, entry: any) => sum + (Number(entry.amount) || 0), 0
+        );
+    } else if (typeof dataObject.tax === "number" && dataObject.tax > 0) {
+        taxCents = dataObject.tax;
+    }
+    const commissionBaseCents     = Math.max(0, amountPaidCents - taxCents);
+    const commissionCents         = Math.floor(commissionBaseCents * Number(affiliate.commission_rate));
+
+    if (commissionCents <= 0) {
+      console.log("[Affiliate] Recurring invoice: commission is zero. Skipping.");
+      return;
+    }
+
+    const now = new Date();
+    const holdUntil = new Date(now);
+    holdUntil.setDate(holdUntil.getDate() + affiliate.payout_hold_days);
+
+    // 5. Insert commission_ledger earned row
+    //    UNIQUE (stripe_event_id) WHERE type='earned' handles webhook replay
+    const { error: ledgerErr } = await supabaseAdmin
+      .from("commission_ledger")
+      .insert([{
+        affiliate_id:     affiliate.id,
+        referral_id:      referral.id,
+        order_id:         orderId,
+        stripe_event_id:  stripeEventId,
+        stripe_invoice_id: stripeInvoiceId,
+        type:             "earned",
+        amount_cents:     commissionCents,
+        currency:         (dataObject.currency ?? "usd").toLowerCase(),
+        hold_until:       holdUntil.toISOString(),
+      }]);
+
+    if (ledgerErr) {
+      if (ledgerErr.code === "23505") {
+        console.log(`[Affiliate] Renewal commission for event ${stripeEventId} already exists. Skipping.`);
+        return;
+      }
+      console.error("[Affiliate] Failed to record renewal commission:", ledgerErr);
+      return;
+    }
+
+    console.log(
+      `[Affiliate] Renewal commission recorded. ` +
+      `Affiliate: ${affiliate.id}, Invoice: ${stripeInvoiceId}, ` +
+      `Amount: ${commissionCents} cents`
+    );
+  }
+}
+
+/**
+ * processAffiliateReversal
+ *
+ * Called after a successful full refund (charge.refunded).
+ * Inserts a 'reversal' row in commission_ledger equal to the
+ * original 'earned' amount. Never modifies the 'earned' row.
+ *
+ * Partial refunds are NOT reversed here — the existing webhook
+ * code flags them for manual admin review and returns early,
+ * so this function is not reachable from partial-refund events.
+ */
+async function processAffiliateReversal(
+  supabaseAdmin: any,
+  stripeEventId: string,
+  orderId: string
+): Promise<void> {
+  // 1. Find the referral linked to this order
+  const { data: referral, error: referralErr } = await supabaseAdmin
+    .from("referrals")
+    .select("id, affiliate_id")
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  if (referralErr || !referral) {
+    console.log(`[Affiliate] No referral found for order ${orderId}. No reversal needed.`);
+    return;
+  }
+
+  // 2. Find the original 'earned' commission row for this order
+  const { data: earnedRow, error: earnedErr } = await supabaseAdmin
+    .from("commission_ledger")
+    .select("id, amount_cents, currency, affiliate_id")
+    .eq("referral_id", referral.id)
+    .eq("order_id", orderId)
+    .eq("type", "earned")
+    .maybeSingle();
+
+  if (earnedErr || !earnedRow) {
+    console.log(`[Affiliate] No earned commission found for referral ${referral.id}. No reversal needed.`);
+    return;
+  }
+
+  // 3. Get payout_hold_days for hold_until
+  const { data: affiliate } = await supabaseAdmin
+    .from("affiliates")
+    .select("payout_hold_days")
+    .eq("id", referral.affiliate_id)
+    .maybeSingle();
+
+  const holdDays = affiliate?.payout_hold_days ?? 30;
+  const now = new Date();
+  const holdUntil = new Date(now);
+  holdUntil.setDate(holdUntil.getDate() + holdDays);
+
+  // 4. Insert reversal row (immutable ledger — never touch the earned row)
+  //    stripe_event_id uniqueness is not enforced on reversals, but the
+  //    event-level stripe_webhooks table already prevents duplicate events.
+  const { error: reversalErr } = await supabaseAdmin
+    .from("commission_ledger")
+    .insert([{
+      affiliate_id:    referral.affiliate_id,
+      referral_id:     referral.id,
+      order_id:        orderId,
+      stripe_event_id: stripeEventId,
+      type:            "reversal",
+      amount_cents:    earnedRow.amount_cents,
+      currency:        earnedRow.currency,
+      hold_until:      holdUntil.toISOString(),
+    }]);
+
+  if (reversalErr) {
+    if (reversalErr.code === "23505") {
+      // UNIQUE violation on commission_ledger_one_reversal_per_order_uidx —
+      // a reversal for this order already exists. This is idempotent: the
+      // stripe_webhooks table already deduped the event, but if something
+      // replayed this code path we log and move on rather than error.
+      console.log(`[Affiliate] Reversal for order ${orderId} already recorded (idempotent). Skipping.`);
+      return;
+    }
+    console.error("[Affiliate] Failed to insert commission reversal row:", reversalErr);
+    return;
+  }
+
+  console.log(
+    `[Affiliate] Commission reversal recorded. ` +
+    `Referral: ${referral.id}, Amount: ${earnedRow.amount_cents} cents`
+  );
+}
+
 serve(async (req: Request) => {
   const signature = req.headers.get("Stripe-Signature");
   const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
@@ -78,18 +464,46 @@ serve(async (req: Request) => {
           const charge = dataObject;
           const isFullRefund = charge.refunded && charge.amount_refunded === charge.amount;
           const paymentIntentId = charge.payment_intent;
-          
-          if (!paymentIntentId) return new Response("No payment intent", { status: 200 });
-          
-          const sessions = await stripe.checkout.sessions.list({ payment_intent: paymentIntentId as string });
-          let stripeSessionId = null;
-          if (sessions.data.length > 0) {
-              stripeSessionId = sessions.data[0].id;
+          const invoiceId       = charge.invoice;   // Present on subscription renewal charges
+
+          if (!paymentIntentId && !invoiceId) {
+              return new Response("No payment or invoice reference on charge", { status: 200 });
           }
-          
-          if (!stripeSessionId) return new Response("No session found for refund", { status: 200 });
-          
-          const { data: order } = await supabaseAdmin.from('orders').select('id, user_id').eq('stripe_session_id', stripeSessionId).maybeSingle();
+
+          // ── Order resolution: invoice-first for recurring subscription refunds ──
+          //
+          // Strategy 1 — direct invoice match (subscription renewals).
+          //   Renewal invoices are NOT associated with a checkout session, so the
+          //   original code's PI → session lookup always missed them.
+          //
+          // Strategy 2 — payment_intent → checkout session (one-time purchases
+          //   and initial subscription checkouts).
+          let order: any = null;
+
+          if (invoiceId) {
+              const { data: invoiceOrder } = await supabaseAdmin
+                  .from('orders')
+                  .select('id, user_id')
+                  .eq('stripe_invoice_id', invoiceId)
+                  .maybeSingle();
+              if (invoiceOrder) order = invoiceOrder;
+          }
+
+          if (!order && paymentIntentId) {
+              const sessions = await stripe.checkout.sessions.list({
+                  payment_intent: paymentIntentId as string
+              });
+              if (sessions.data.length > 0) {
+                  const stripeSessionId = sessions.data[0].id;
+                  const { data: sessionOrder } = await supabaseAdmin
+                      .from('orders')
+                      .select('id, user_id')
+                      .eq('stripe_session_id', stripeSessionId)
+                      .maybeSingle();
+                  if (sessionOrder) order = sessionOrder;
+              }
+          }
+
           if (!order) return new Response("No order found for refund", { status: 200 });
 
           if (!isFullRefund) {
@@ -123,6 +537,19 @@ serve(async (req: Request) => {
                   }
               }
           }
+
+          // ── Affiliate commission reversal (non-fatal) ──
+          // Runs after all license revocations complete.
+          // Appends a 'reversal' row to commission_ledger equal to the original
+          // 'earned' amount. Never modifies or deletes the original row.
+          // Partial refunds are flagged for manual review above and return early,
+          // so this block is only reached on full refunds.
+          try {
+              await processAffiliateReversal(supabaseAdmin, event.id, order.id);
+          } catch (affErr) {
+              console.error("[Affiliate] Commission reversal error (non-fatal):", affErr);
+          }
+
           return new Response("Refund processed", { status: 200 });
       }
       
@@ -613,6 +1040,35 @@ serve(async (req: Request) => {
              body: { action: emailAction, contact_id: contactId, entity_id: emailEntityId }
           });
           if (emailErr) console.error(`[Warning] Failed to invoke email webhook:`, emailErr);
+      }
+
+      // ── 8. AFFILIATE ATTRIBUTION (non-fatal — runs after all fulfillment commits) ──
+      //
+      // checkout.session.completed → reads affiliate_session_token from Stripe session
+      //   metadata, validates the click, runs the definitive self-referral check, voids
+      //   any prior active referral for this user (last-click wins), inserts a referral
+      //   row, and appends the first 'earned' commission_ledger entry.
+      //
+      // invoice.paid (recurring) → finds the existing active referral for the user,
+      //   checks commission_expires_at, and appends a renewal 'earned' row.
+      //   The UNIQUE index on (stripe_event_id) WHERE type='earned' makes this
+      //   idempotent against webhook replay.
+      //
+      // Any error is caught and logged. Order fulfillment is already committed above;
+      // affiliate attribution is purely additive and must never roll it back.
+      try {
+          await processAffiliateAttribution(
+              supabaseAdmin,
+              dataObject,
+              isSession,
+              isRecurringInvoice,
+              event.id,
+              newOrder.id,
+              userId,
+              stripeInvoiceId
+          );
+      } catch (affErr) {
+          console.error("[Affiliate] Attribution error (non-fatal):", affErr);
       }
 
       console.log(`[Success] Fulfillment Complete for Entity: ${fulfillmentEntityId} -> Order: ${newOrder.id}`);
