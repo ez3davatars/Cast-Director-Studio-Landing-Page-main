@@ -8,6 +8,14 @@
 -- Application-layer validation in stripe-webhook handles routing safely
 ALTER TABLE products DROP CONSTRAINT IF EXISTS products_product_type_check;
 
+-- Fresh-dev compatibility guard:
+-- the baseline products migration creates a narrow table, while this
+-- data migration writes the current product catalog columns.
+ALTER TABLE IF EXISTS public.products
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS sku text,
+  ADD COLUMN IF NOT EXISTS price_usd numeric,
+  ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
 
 UPDATE products
 SET stripe_price_id = 'price_1TRiI1DETDyl6ph1Hv32GRBU',
