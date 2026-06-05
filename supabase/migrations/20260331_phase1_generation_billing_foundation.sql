@@ -50,13 +50,19 @@ end$$;
 
 -- 3) Harden profiles.credit_balance
 -- Confirmed schema: profiles.id matches auth.users.id
-alter table public.profiles
-  add column if not exists credit_balance integer not null default 0;
+do $$
+begin
+  if to_regclass('public.profiles') is not null then
+    alter table public.profiles
+      add column if not exists credit_balance integer not null default 0;
+  end if;
+end$$;
 
 -- Ensure only one non-negative constraint exists
 do $$
 begin
-  if not exists (
+  if to_regclass('public.profiles') is not null
+     and not exists (
     select 1 from pg_constraint 
     where conname = 'profiles_credit_balance_nonnegative'
   ) then
