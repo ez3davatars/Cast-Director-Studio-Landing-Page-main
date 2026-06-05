@@ -1,6 +1,6 @@
 // @ts-nocheck: Supabase Edge Function uses external runtime SDK types validated at deployment/runtime.
-import { serve } from "std/http/server";
-import { createClient } from "@supabase/supabase-js";
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

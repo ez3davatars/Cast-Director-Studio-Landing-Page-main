@@ -1,7 +1,7 @@
 // @ts-nocheck: Supabase Edge Function uses external runtime SDK types validated at deployment/runtime.
-import { serve } from "std/http/server";
-import { createClient } from "@supabase/supabase-js";
-import Stripe from "stripe";
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import Stripe from "npm:stripe@^17.7.0";
 
 // ──────────────────────────────────────────────────
 // Stripe + CORS
