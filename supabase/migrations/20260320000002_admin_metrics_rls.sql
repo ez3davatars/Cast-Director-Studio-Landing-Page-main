@@ -27,8 +27,19 @@ BEGIN
     CREATE POLICY "Admins can view all downloads" ON public.downloads FOR SELECT USING ((auth.jwt() -> 'app_metadata' ->> 'is_admin')::boolean = true);
   END IF;
   
-  -- Add contacts just in case it is queried later for customer mapping
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'contacts' AND policyname = 'Admins can view all contacts') THEN
-    CREATE POLICY "Admins can view all contacts" ON public.contacts FOR SELECT USING ((auth.jwt() -> 'app_metadata' ->> 'is_admin')::boolean = true);
+  -- Add contacts policy only if the legacy public.contacts table exists.
+  -- Fresh dev projects may only have public.crm_contacts.
+  IF to_regclass('public.contacts') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_policies
+       WHERE schemaname = 'public'
+         AND tablename = 'contacts'
+         AND policyname = 'Admins can view all contacts'
+     ) THEN
+    CREATE POLICY "Admins can view all contacts" ON public.contacts
+      FOR SELECT
+      USING ((auth.jwt() -> 'app_metadata' ->> 'is_admin')::boolean = true);
   END IF;
 END $$;
+
