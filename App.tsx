@@ -27,6 +27,9 @@ import CustomersAdmin from './pages/admin/Customers';
 import CustomerDetailAdmin from './pages/admin/CustomerDetail';
 import InboxAdmin from './pages/admin/Inbox';
 import LeadsAdmin from './pages/admin/Leads';
+import AffiliatesAdmin from './pages/admin/Affiliates';
+import AffiliateDetailAdmin from './pages/admin/AffiliateDetail';
+import PayoutsAdmin from './pages/admin/Payouts';
 import Success from './pages/Success';
 import GetStarted from './pages/GetStarted';
 import DownloadHandler from './pages/DownloadHandler';
@@ -208,6 +211,9 @@ function App() {
             <Route path="customers/:id" element={<CustomerDetailAdmin />} />
             <Route path="inbox" element={<InboxAdmin />} />
             <Route path="leads" element={<LeadsAdmin />} />
+            <Route path="affiliates" element={<AffiliatesAdmin />} />
+            <Route path="affiliates/:id" element={<AffiliateDetailAdmin />} />
+            <Route path="payouts" element={<PayoutsAdmin />} />
           </Route>
           
           {/* Content Pages */}

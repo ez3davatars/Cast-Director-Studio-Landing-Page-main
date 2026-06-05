@@ -2,18 +2,20 @@ import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { 
-  ShoppingBag, 
-  Repeat, 
-  Key, 
-  Activity, 
+import {
+  ShoppingBag,
+  Repeat,
+  Key,
+  Activity,
   Download,
   Mail,
   Users,
   LogOut,
   ChevronLeft,
   Inbox,
-  MessageSquare
+  MessageSquare,
+  UserCheck,
+  Banknote,
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -133,6 +135,36 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
               <span className="font-medium text-sm">Support Inbox</span>
             </NavLink>
           )}
+
+          <div className="text-xs font-bold text-nano-text uppercase tracking-widest mt-6 mb-2 px-2">
+            Phase 4
+          </div>
+          <NavLink
+            to="/admin/affiliates"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`
+            }
+          >
+            <UserCheck size={18} />
+            <span className="font-medium text-sm">Affiliates</span>
+          </NavLink>
+          <NavLink
+            to="/admin/payouts"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`
+            }
+          >
+            <Banknote size={18} />
+            <span className="font-medium text-sm">Payouts</span>
+          </NavLink>
         </nav>
 
         <div className="p-4 border-t border-nano-border flex flex-col gap-2">
