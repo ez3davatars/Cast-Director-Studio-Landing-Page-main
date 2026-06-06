@@ -130,7 +130,7 @@ const AffiliatesAdmin: React.FC = () => {
       //   1. Looks up user_id from auth.users by email
       //   2. Inserts affiliates row (status = pending)
       //   3. Inserts default affiliate_links row (code = affiliate code,
-      //      destination_url = /pricing, campaign = default)
+      //      destination_url = /, campaign = default)
       // If any step fails the transaction rolls back — no orphaned rows.
       const { data, error: rpcErr } = await supabase.rpc('admin_create_affiliate', {
         p_email:                      email,

@@ -33,6 +33,7 @@ import PayoutsAdmin from './pages/admin/Payouts';
 import Success from './pages/Success';
 import GetStarted from './pages/GetStarted';
 import DownloadHandler from './pages/DownloadHandler';
+import AffiliateRedirect from './pages/AffiliateRedirect';
 import Documentation from './pages/Documentation';
 import Tutorials from './pages/Tutorials';
 import Community from './pages/Community';
@@ -172,6 +173,7 @@ function App() {
 
         <Routes>
           <Route path="/" element={LandingPage} />
+          <Route path="/pricing" element={LandingPage} />
           
           <Route path="/success/:type" element={<Success />} />
           <Route path="/get-started" element={<GetStarted />} />
@@ -179,6 +181,7 @@ function App() {
           
           {/* Secure Cloudflare R2 Delivery Handoff Route */}
           <Route path="/download/:id" element={<DownloadHandler />} />
+          <Route path="/a/:code" element={<AffiliateRedirect />} />
 
           <Route
             path="/account"
