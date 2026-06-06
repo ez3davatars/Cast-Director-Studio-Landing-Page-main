@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.refresh-download-link]
 verify_jwt = false
+
+[functions.record-affiliate-click]
+verify_jwt = false
