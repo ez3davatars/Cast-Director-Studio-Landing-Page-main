@@ -4,6 +4,7 @@ import { Check, Loader2 } from 'lucide-react';
 import DuplicatePurchaseModal from './DuplicatePurchaseModal';
 import { getProductByKey, resolveCatalogEntryFromDbProduct, resolveDisplayName } from '../lib/products';
 import { supabase } from '../lib/supabase';
+import { getAffiliateAttributionHeaders, withAffiliateAttributionBody } from '../lib/affiliateAttribution';
 
 /* ── Fallback prices shown when live pricing data is unavailable ── */
 const FALLBACK_PRICES: Record<string, { displayPrice: string; interval: string; billingSuffix: string }> = {
@@ -272,12 +273,13 @@ const Pricing: React.FC<PricingProps> = ({
           'Content-Type': 'application/json',
           'apikey': supabaseAnonKey,
           'Authorization': `Bearer ${bearerToken}`,
+          ...getAffiliateAttributionHeaders(),
         },
-        body: JSON.stringify({
+        body: JSON.stringify(withAffiliateAttributionBody({
           productKey,
           successUrl,
           cancelUrl,
-        }),
+        })),
       });
 
       let responseBody: any = null;

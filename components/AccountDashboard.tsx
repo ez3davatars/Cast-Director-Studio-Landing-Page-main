@@ -4,6 +4,7 @@ import ClaimPurchasesModal from './ClaimPurchasesModal';
 import { Session } from '@supabase/supabase-js';
 import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
+import { getAffiliateAttributionHeaders, withAffiliateAttributionBody } from '../lib/affiliateAttribution';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
 import { Loader2, Info, MessageSquare, LifeBuoy, Monitor, Smartphone, Laptop, X, AlertTriangle } from 'lucide-react';
 
@@ -673,12 +674,13 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                     'Content-Type': 'application/json',
                     'apikey': supabaseAnonKey,
                     'Authorization': `Bearer ${activeSession.access_token}`,
+                    ...getAffiliateAttributionHeaders(),
                 },
-                body: JSON.stringify({
+                body: JSON.stringify(withAffiliateAttributionBody({
                     productKey: packKey,
                     successUrl,
                     cancelUrl,
-                }),
+                })),
             });
 
             let responseBody: any = null;
@@ -740,13 +742,14 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const catalogEntry = resolveCatalogEntryFromDbProduct(product);
 
             const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-                body: {
+                headers: getAffiliateAttributionHeaders(),
+                body: withAffiliateAttributionBody({
                     priceId: product.stripe_price_id,
                     mode: catalogEntry?.checkoutMode || 'payment',
                     productKey: productKey,
                     successUrl: returnUrl,
                     cancelUrl: `${window.location.origin}/#pricing`,
-                }
+                })
             });
 
             if (error) {
@@ -810,13 +813,14 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const catalogEntry = resolveCatalogEntryFromDbProduct(product);
 
             const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-                body: {
+                headers: getAffiliateAttributionHeaders(),
+                body: withAffiliateAttributionBody({
                     priceId: product.stripe_price_id,
                     mode: catalogEntry?.checkoutMode || 'subscription',
                     productKey: productKey,
                     successUrl: returnUrl,
                     cancelUrl: `${window.location.origin}/#pricing`,
-                }
+                })
             });
 
             if (error) {
