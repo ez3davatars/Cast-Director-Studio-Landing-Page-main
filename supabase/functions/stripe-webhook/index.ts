@@ -8,6 +8,13 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
   apiVersion: "2023-10-16",
 });
 
+function calculateCommissionHoldUntil(payoutHoldDays: number | null | undefined): Date {
+  const holdDays = Math.max(0, Number(payoutHoldDays) || 0);
+  const bufferMs = 60_000;
+
+  return new Date(Date.now() + holdDays * 24 * 60 * 60 * 1000 + bufferMs);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // AFFILIATE ATTRIBUTION HELPERS
 //
@@ -216,9 +223,9 @@ async function processAffiliateAttribution(
       return;
     }
 
-    // 6. Compute payout hold
-    const holdUntil = new Date(now);
-    holdUntil.setDate(holdUntil.getDate() + affiliate.payout_hold_days);
+    // 6. Compute payout hold with a safety buffer so hold_until is always
+    //    after the database-created commission_ledger.created_at timestamp.
+    const holdUntil = calculateCommissionHoldUntil(affiliate.payout_hold_days);
 
     // 7. Insert commission_ledger 'earned' row (append-only, immutable)
     const { error: ledgerErr } = await supabaseAdmin
@@ -328,9 +335,7 @@ async function processAffiliateAttribution(
       return;
     }
 
-    const now = new Date();
-    const holdUntil = new Date(now);
-    holdUntil.setDate(holdUntil.getDate() + affiliate.payout_hold_days);
+    const holdUntil = calculateCommissionHoldUntil(affiliate.payout_hold_days);
 
     // 5. Insert commission_ledger earned row
     //    UNIQUE (stripe_event_id) WHERE type='earned' handles webhook replay
