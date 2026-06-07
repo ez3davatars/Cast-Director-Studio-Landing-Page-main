@@ -64,6 +64,25 @@ async function processAffiliateAttribution(
       return;
     }
 
+    if (dataObject.payment_status && dataObject.payment_status !== "paid") {
+      console.log(`[Affiliate] Checkout session ${dataObject.id} is not paid. Skipping.`);
+      return;
+    }
+
+    // Idempotency specific to affiliate commissions. This also lets an already
+    // fulfilled order safely retry attribution without creating a duplicate row.
+    const { data: existingCommission } = await supabaseAdmin
+      .from("commission_ledger")
+      .select("id")
+      .eq("stripe_event_id", stripeEventId)
+      .eq("type", "earned")
+      .maybeSingle();
+
+    if (existingCommission) {
+      console.log(`[Affiliate] Commission for event ${stripeEventId} already exists. Skipping.`);
+      return;
+    }
+
     // 1. Look up the click row by session token
     const { data: click, error: clickLookupErr } = await supabaseAdmin
       .from("affiliate_clicks")
@@ -73,16 +92,6 @@ async function processAffiliateAttribution(
 
     if (clickLookupErr || !click) {
       console.log("[Affiliate] Click not found for session token. Skipping attribution.");
-      return;
-    }
-
-    if (click.converted) {
-      console.log(`[Affiliate] Click ${click.id} already converted. Skipping duplicate.`);
-      return;
-    }
-
-    if (new Date(click.expires_at) <= new Date()) {
-      console.log(`[Affiliate] Click ${click.id} attribution window expired. Skipping.`);
       return;
     }
 
@@ -105,7 +114,97 @@ async function processAffiliateAttribution(
       return;
     }
 
-    // 4. Commission amount — exclude taxes (CLAUDE.md: no commission on taxes)
+    // 4. Find or create the single active referral for this referred user.
+    //    A converted click is allowed to keep earning later one-time checkouts
+    //    through the existing referral while the commission period is active.
+    const now = new Date();
+    const clickExpired = new Date(click.expires_at) <= now;
+
+    let referral: any = null;
+    const { data: activeReferral, error: referralLookupErr } = await supabaseAdmin
+      .from("referrals")
+      .select("id, affiliate_id, commission_expires_at")
+      .eq("referred_user_id", resolvedUserId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (referralLookupErr) {
+      console.warn("[Affiliate] Failed to look up active referral (non-fatal):", referralLookupErr);
+    }
+
+    if (activeReferral?.affiliate_id === affiliate.id) {
+      referral = activeReferral;
+      if (new Date(referral.commission_expires_at) <= now) {
+        console.log(`[Affiliate] Referral ${referral.id} commission period expired. Skipping.`);
+        return;
+      }
+    } else if (activeReferral) {
+      if (clickExpired) {
+        console.log("[Affiliate] Different active referral exists and click attribution window expired. Skipping.");
+        return;
+      }
+
+      const { error: voidErr } = await supabaseAdmin
+        .from("referrals")
+        .update({ status: "voided", updated_at: now.toISOString() })
+        .eq("id", activeReferral.id);
+
+      if (voidErr) {
+        console.warn("[Affiliate] Failed to void prior active referral (non-fatal):", voidErr);
+      }
+    }
+
+    if (!referral) {
+      if (clickExpired) {
+        console.log(`[Affiliate] Click ${click.id} attribution window expired and no reusable referral exists. Skipping.`);
+        return;
+      }
+
+      const commissionExpiresAt = new Date(now);
+      commissionExpiresAt.setMonth(
+        commissionExpiresAt.getMonth() + affiliate.commission_duration_months
+      );
+
+      const { data: newReferral, error: referralErr } = await supabaseAdmin
+        .from("referrals")
+        .insert([{
+          affiliate_id:          affiliate.id,
+          click_id:              click.id,
+          referred_user_id:      resolvedUserId,
+          stripe_customer_id:    dataObject.customer ?? null,
+          stripe_session_id:     dataObject.id ?? null,
+          order_id:              orderId,
+          attributed_at:         now.toISOString(),
+          commission_expires_at: commissionExpiresAt.toISOString(),
+          status:                "active",
+        }])
+        .select("id, affiliate_id, commission_expires_at")
+        .single();
+
+      if (referralErr || !newReferral) {
+        if (referralErr?.code === "23505") {
+          const { data: retryReferral } = await supabaseAdmin
+            .from("referrals")
+            .select("id, affiliate_id, commission_expires_at")
+            .eq("referred_user_id", resolvedUserId)
+            .eq("status", "active")
+            .maybeSingle();
+
+          if (retryReferral?.affiliate_id === affiliate.id) {
+            referral = retryReferral;
+          }
+        }
+
+        if (!referral) {
+          console.error("[Affiliate] Failed to insert or reuse referral:", referralErr);
+          return;
+        }
+      } else {
+        referral = newReferral;
+      }
+    }
+
+    // 5. Commission amount — exclude taxes (CLAUDE.md: no commission on taxes)
     //    amount_total is in cents (Stripe). total_details.amount_tax is also cents.
     const amountTotalCents: number = dataObject.amount_total ?? 0;
     const taxCents: number         = dataObject.total_details?.amount_tax ?? 0;
@@ -117,59 +216,16 @@ async function processAffiliateAttribution(
       return;
     }
 
-    // 5. Compute key dates
-    const now = new Date();
-
-    const commissionExpiresAt = new Date(now);
-    commissionExpiresAt.setMonth(
-      commissionExpiresAt.getMonth() + affiliate.commission_duration_months
-    );
-
+    // 6. Compute payout hold
     const holdUntil = new Date(now);
     holdUntil.setDate(holdUntil.getDate() + affiliate.payout_hold_days);
 
-    // 6. Void any prior active referral for this user (last-click attribution)
-    //    The partial unique index referrals_active_per_user_uidx enforces at most
-    //    one active referral, so we void before inserting the new one.
-    const { error: voidErr } = await supabaseAdmin
-      .from("referrals")
-      .update({ status: "voided", updated_at: now.toISOString() })
-      .eq("referred_user_id", resolvedUserId)
-      .eq("status", "active");
-
-    if (voidErr) {
-      // Non-blocking: log and continue — the unique index will catch duplicates
-      console.warn("[Affiliate] Failed to void prior active referral (non-fatal):", voidErr);
-    }
-
-    // 7. Insert referral
-    const { data: newReferral, error: referralErr } = await supabaseAdmin
-      .from("referrals")
-      .insert([{
-        affiliate_id:          affiliate.id,
-        click_id:              click.id,
-        referred_user_id:      resolvedUserId,
-        stripe_customer_id:    dataObject.customer ?? null,
-        stripe_session_id:     dataObject.id ?? null,
-        order_id:              orderId,
-        attributed_at:         now.toISOString(),
-        commission_expires_at: commissionExpiresAt.toISOString(),
-        status:                "active",
-      }])
-      .select("id")
-      .single();
-
-    if (referralErr || !newReferral) {
-      console.error("[Affiliate] Failed to insert referral:", referralErr);
-      return;
-    }
-
-    // 8. Insert commission_ledger 'earned' row (append-only, immutable)
+    // 7. Insert commission_ledger 'earned' row (append-only, immutable)
     const { error: ledgerErr } = await supabaseAdmin
       .from("commission_ledger")
       .insert([{
         affiliate_id:             affiliate.id,
-        referral_id:              newReferral.id,
+        referral_id:              referral.id,
         order_id:                 orderId,
         stripe_event_id:          stripeEventId,
         stripe_payment_intent_id: dataObject.payment_intent ?? null,
@@ -190,20 +246,24 @@ async function processAffiliateAttribution(
       return;
     }
 
-    // 9. Mark click as converted
-    await supabaseAdmin
-      .from("affiliate_clicks")
-      .update({
-        converted:          true,
-        converted_at:       now.toISOString(),
-        attributed_user_id: resolvedUserId,
-      })
-      .eq("id", click.id);
+    // 8. Mark the original click as converted once. Later one-time purchases
+    //    can keep earning via the referral without rewriting conversion history.
+    if (!click.converted) {
+      await supabaseAdmin
+        .from("affiliate_clicks")
+        .update({
+          converted:          true,
+          converted_at:       now.toISOString(),
+          attributed_user_id: resolvedUserId,
+        })
+        .eq("id", click.id);
+    }
 
     console.log(
       `[Affiliate] Attribution complete. ` +
       `Affiliate: ${affiliate.id}, User: ${resolvedUserId}, ` +
-      `Commission: ${commissionCents} cents, Hold until: ${holdUntil.toISOString()}`
+      `Referral: ${referral.id}, Commission: ${commissionCents} cents, ` +
+      `Hold until: ${holdUntil.toISOString()}`
     );
     return;
   }
@@ -453,6 +513,39 @@ serve(async (req: Request) => {
   if (eventInsertError) {
       if (eventInsertError.code === '23505' || eventInsertError.message.includes('duplicate')) {
           console.log(`[Idempotency] Event ${event.id} already processed. Dropping duplicate.`);
+          if (isSession || isRecurringInvoice) {
+              try {
+                  const stripeSessionId = isSession ? dataObject.id : null;
+                  const stripeInvoiceId = isInvoice ? dataObject.id : null;
+                  const { data: existingOrder } = await supabaseAdmin
+                      .from('orders')
+                      .select('id, user_id')
+                      .or(isSession ? `stripe_session_id.eq.${stripeSessionId}` : `stripe_invoice_id.eq.${stripeInvoiceId}`)
+                      .maybeSingle();
+
+                  if (existingOrder) {
+                      const fallbackUserId =
+                          existingOrder.user_id ||
+                          dataObject.client_reference_id ||
+                          dataObject.metadata?.user_id ||
+                          dataObject.subscription_details?.metadata?.user_id ||
+                          null;
+
+                      await processAffiliateAttribution(
+                          supabaseAdmin,
+                          dataObject,
+                          isSession,
+                          isRecurringInvoice,
+                          event.id,
+                          existingOrder.id,
+                          fallbackUserId,
+                          stripeInvoiceId
+                      );
+                  }
+              } catch (affErr) {
+                  console.error("[Affiliate] Duplicate-event attribution retry failed (non-fatal):", affErr);
+              }
+          }
           return new Response("Duplicate event ignored", { status: 200 });
       }
       console.error(`[Error] Failed to log event ${event.id}:`, eventInsertError);
