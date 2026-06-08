@@ -20,6 +20,16 @@ const resolveOnboardingStatus = (account: any, requirementsDue: string[]) => {
   return "incomplete";
 };
 
+const isMissingStripeAccountError = (err: any) =>
+  err?.code === "resource_missing" ||
+  err?.raw?.code === "resource_missing" ||
+  /No such account/i.test(err?.message || "");
+
+const stripeErrorLog = (err: any) => ({
+  code: err?.code || err?.raw?.code || null,
+  message: err?.message || "Stripe request failed",
+});
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -57,7 +67,40 @@ serve(async (req: Request) => {
     if (!stripeSecretKey) return json({ error: "Stripe is not configured" }, 500);
 
     const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
-    const account = await stripe.accounts.retrieve(affiliate.stripe_connect_account_id);
+    let account;
+    try {
+      account = await stripe.accounts.retrieve(affiliate.stripe_connect_account_id);
+    } catch (err) {
+      if (!isMissingStripeAccountError(err)) throw err;
+
+      console.warn("[sync-affiliate-connect-account] stale account reset", {
+        affiliate_id: affiliate.id,
+        stripe_connect_account_id: affiliate.stripe_connect_account_id,
+        stripe_error: stripeErrorLog(err),
+      });
+
+      const resetUpdates = {
+        payout_method: "manual",
+        stripe_connect_account_id: null,
+        stripe_connect_onboarding_status: "not_started",
+        stripe_connect_payouts_enabled: false,
+        stripe_connect_charges_enabled: false,
+        stripe_connect_requirements_due: [],
+      };
+
+      const { error: resetError } = await supabaseAdmin
+        .from("affiliates")
+        .update(resetUpdates)
+        .eq("id", affiliate.id);
+
+      if (resetError) return json({ error: resetError.message }, 500);
+
+      return json({
+        reset: true,
+        message: "Stripe direct deposit account was removed. Please set it up again.",
+      });
+    }
+
     const requirementsDue = account.requirements?.currently_due || [];
     const onboardingStatus = resolveOnboardingStatus(account, requirementsDue);
 

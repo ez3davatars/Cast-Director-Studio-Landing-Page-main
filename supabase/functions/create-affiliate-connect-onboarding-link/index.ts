@@ -26,6 +26,11 @@ const getStripeErrorDiagnostics = (err: any) => ({
   requestId: err?.requestId || err?.raw?.requestId || err?.raw?.request_id || null,
 });
 
+const isMissingStripeAccountError = (err: any) =>
+  err?.code === "resource_missing" ||
+  err?.raw?.code === "resource_missing" ||
+  /No such account/i.test(err?.message || "");
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -65,6 +70,28 @@ serve(async (req: Request) => {
     }
 
     const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
+    try {
+      await stripe.accounts.retrieve(affiliate.stripe_connect_account_id);
+    } catch (err) {
+      const stripeError = getStripeErrorDiagnostics(err);
+      if (!isMissingStripeAccountError(err)) throw err;
+
+      console.warn("[create-affiliate-connect-onboarding-link] missing saved account", {
+        affiliate_id: affiliate.id,
+        stripe_connect_account_id: affiliate.stripe_connect_account_id,
+        stripe_error: {
+          code: stripeError.code,
+          message: stripeError.message,
+        },
+      });
+
+      return json({
+        reset: true,
+        error: "Stripe direct deposit account was removed. Please set it up again.",
+        stripe_error: stripeError,
+      }, 409);
+    }
+
     const accountLink = await stripe.accountLinks.create({
       account: affiliate.stripe_connect_account_id,
       return_url: `${siteUrl}/affiliate/payouts/return`,

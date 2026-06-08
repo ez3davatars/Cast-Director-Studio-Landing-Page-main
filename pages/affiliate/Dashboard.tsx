@@ -38,6 +38,26 @@ const getConnectButtonLabel = (affiliate: any) => {
   return 'Set up direct deposit through Stripe';
 };
 
+const readFunctionErrorPayload = async (error: any) => {
+  try {
+    const context = error?.context;
+    if (context && typeof context.json === 'function') return await context.json();
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const resetConnectFields = (prev: any) => ({
+  ...prev,
+  payout_method: 'manual',
+  stripe_connect_account_id: null,
+  stripe_connect_onboarding_status: 'not_started',
+  stripe_connect_payouts_enabled: false,
+  stripe_connect_charges_enabled: false,
+  stripe_connect_requirements_due: [],
+});
+
 const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -202,7 +222,17 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
       const { data, error: linkErr } = await supabase.functions.invoke('create-affiliate-connect-onboarding-link', {
         body: {},
       });
-      if (linkErr) throw new Error(linkErr.message);
+      if (linkErr) {
+        const payload = await readFunctionErrorPayload(linkErr);
+        if (payload?.reset) {
+          setAffiliate(resetConnectFields);
+          setConnectMessage('Your previous Stripe direct deposit setup was removed. Please set it up again.');
+          setRefreshKey(k => k + 1);
+          setConnectActionLoading(false);
+          return;
+        }
+        throw new Error(payload?.error || linkErr.message);
+      }
       if (!data?.url) throw new Error('Stripe onboarding link was not returned.');
 
       window.location.assign(data.url);
@@ -217,10 +247,19 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
     setConnectError(null);
     setConnectMessage(null);
     try {
-      const { error: syncErr } = await supabase.functions.invoke('sync-affiliate-connect-account', {
+      const { data, error: syncErr } = await supabase.functions.invoke('sync-affiliate-connect-account', {
         body: {},
       });
-      if (syncErr) throw new Error(syncErr.message);
+      if (syncErr) {
+        const payload = await readFunctionErrorPayload(syncErr);
+        throw new Error(payload?.error || syncErr.message);
+      }
+      if (data?.reset) {
+        setAffiliate(resetConnectFields);
+        setConnectMessage('Your previous Stripe direct deposit setup was removed. Please set it up again.');
+        setRefreshKey(k => k + 1);
+        return;
+      }
       setConnectMessage('Stripe payout account status refreshed.');
       setRefreshKey(k => k + 1);
     } catch (err: any) {

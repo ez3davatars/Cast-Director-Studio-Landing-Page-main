@@ -38,6 +38,32 @@ const getAuthenticatedAffiliate = async (req: Request) => {
   return { supabaseAdmin, user, affiliate };
 };
 
+const isMissingStripeAccountError = (err: any) =>
+  err?.code === "resource_missing" ||
+  err?.raw?.code === "resource_missing" ||
+  /No such account/i.test(err?.message || "");
+
+const stripeErrorLog = (err: any) => ({
+  code: err?.code || err?.raw?.code || null,
+  message: err?.message || "Stripe request failed",
+});
+
+const getAccountStatus = (account: any) => {
+  const requirementsDue = account.requirements?.currently_due || [];
+  const onboardingStatus = account.details_submitted
+    ? account.payouts_enabled && requirementsDue.length === 0 ? "ready" : "restricted"
+    : "created";
+
+  return {
+    payout_method: "stripe_connect",
+    stripe_connect_account_id: account.id,
+    stripe_connect_onboarding_status: onboardingStatus,
+    stripe_connect_payouts_enabled: Boolean(account.payouts_enabled),
+    stripe_connect_charges_enabled: Boolean(account.charges_enabled),
+    stripe_connect_requirements_due: requirementsDue,
+  };
+};
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -50,14 +76,45 @@ serve(async (req: Request) => {
     const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
     if (!stripeSecretKey) return json({ error: "Stripe is not configured" }, 500);
 
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
     if (affiliate.stripe_connect_account_id) {
-      return json({
-        stripe_connect_account_id: affiliate.stripe_connect_account_id,
-        stripe_connect_onboarding_status: affiliate.stripe_connect_onboarding_status || "created",
-      });
+      try {
+        const existingAccount = await stripe.accounts.retrieve(affiliate.stripe_connect_account_id);
+        const existingStatus = getAccountStatus(existingAccount);
+
+        const { error: existingUpdateError } = await supabaseAdmin
+          .from("affiliates")
+          .update(existingStatus)
+          .eq("id", affiliate.id);
+
+        if (existingUpdateError) return json({ error: existingUpdateError.message }, 500);
+
+        return json(existingStatus);
+      } catch (err) {
+        if (!isMissingStripeAccountError(err)) throw err;
+
+        console.warn("[create-affiliate-connect-account] stale account cleared", {
+          affiliate_id: affiliate.id,
+          stripe_connect_account_id: affiliate.stripe_connect_account_id,
+          stripe_error: stripeErrorLog(err),
+        });
+
+        const { error: resetError } = await supabaseAdmin
+          .from("affiliates")
+          .update({
+            payout_method: "manual",
+            stripe_connect_account_id: null,
+            stripe_connect_onboarding_status: "not_started",
+            stripe_connect_payouts_enabled: false,
+            stripe_connect_charges_enabled: false,
+            stripe_connect_requirements_due: [],
+          })
+          .eq("id", affiliate.id);
+
+        if (resetError) return json({ error: resetError.message }, 500);
+      }
     }
 
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
     const account = await stripe.accounts.create({
       type: "express",
       email: user.email || affiliate.contact_email || undefined,
@@ -71,32 +128,16 @@ serve(async (req: Request) => {
       },
     });
 
-    const requirementsDue = account.requirements?.currently_due || [];
-    const onboardingStatus = account.details_submitted
-      ? account.payouts_enabled && requirementsDue.length === 0 ? "ready" : "restricted"
-      : "created";
+    const accountStatus = getAccountStatus(account);
 
     const { error: updateError } = await supabaseAdmin
       .from("affiliates")
-      .update({
-        payout_method: "stripe_connect",
-        stripe_connect_account_id: account.id,
-        stripe_connect_onboarding_status: onboardingStatus,
-        stripe_connect_payouts_enabled: Boolean(account.payouts_enabled),
-        stripe_connect_charges_enabled: Boolean(account.charges_enabled),
-        stripe_connect_requirements_due: requirementsDue,
-      })
+      .update(accountStatus)
       .eq("id", affiliate.id);
 
     if (updateError) return json({ error: updateError.message }, 500);
 
-    return json({
-      stripe_connect_account_id: account.id,
-      stripe_connect_onboarding_status: onboardingStatus,
-      stripe_connect_payouts_enabled: Boolean(account.payouts_enabled),
-      stripe_connect_charges_enabled: Boolean(account.charges_enabled),
-      stripe_connect_requirements_due: requirementsDue,
-    });
+    return json(accountStatus);
   } catch (err) {
     console.error("[create-affiliate-connect-account] failed", err?.message || err);
     return json({ error: "Unable to create Stripe direct deposit account" }, 500);
