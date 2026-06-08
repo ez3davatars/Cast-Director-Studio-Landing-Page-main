@@ -16,6 +16,7 @@ import {
   MessageSquare,
   UserCheck,
   Banknote,
+  LayoutDashboard,
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -62,6 +63,21 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
         </div>
         
         <nav className="flex-1 overflow-y-auto py-6 flex flex-col gap-2 px-4">
+          <NavLink
+            to="/admin"
+            end
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`
+            }
+          >
+            <LayoutDashboard size={18} />
+            <span className="font-medium text-sm">Dashboard</span>
+          </NavLink>
+
           <div className="text-xs font-bold text-nano-text uppercase tracking-widest mb-2 px-2">
             Phase 1
           </div>

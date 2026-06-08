@@ -17,6 +17,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import AccountDashboard from './components/AccountDashboard';
 import AdminRoute from './components/AdminRoute';
 import AdminLayout from './components/AdminLayout';
+import AdminDashboard from './pages/admin/Dashboard';
 import OrdersAdmin from './pages/admin/Orders';
 import SubscriptionsAdmin from './pages/admin/Subscriptions';
 import LicensesAdmin from './pages/admin/Licenses';
@@ -203,7 +204,7 @@ function App() {
               </AdminRoute>
             }
           >
-            <Route index element={<Navigate to="orders" replace />} />
+            <Route index element={<AdminDashboard />} />
             <Route path="orders" element={<OrdersAdmin />} />
             <Route path="subscriptions" element={<SubscriptionsAdmin />} />
             <Route path="licenses" element={<LicensesAdmin />} />
