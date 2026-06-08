@@ -14,8 +14,17 @@ const json = (body: Record<string, unknown>, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-const getSiteUrl = () =>
-  (Deno.env.get("SITE_URL") || Deno.env.get("PUBLIC_SITE_URL") || "https://castdirectorstudio.com").replace(/\/+$/, "");
+const getSiteUrl = () => {
+  const siteUrl = Deno.env.get("SITE_URL")?.trim();
+  return siteUrl ? siteUrl.replace(/\/+$/, "") : null;
+};
+
+const getStripeErrorDiagnostics = (err: any) => ({
+  type: err?.type || null,
+  code: err?.code || err?.raw?.code || null,
+  message: err?.message || "Stripe request failed",
+  requestId: err?.requestId || err?.raw?.requestId || err?.raw?.request_id || null,
+});
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -49,17 +58,27 @@ serve(async (req: Request) => {
     if (!stripeSecretKey) return json({ error: "Stripe is not configured" }, 500);
 
     const siteUrl = getSiteUrl();
+    if (!siteUrl) {
+      return json({
+        error: "SITE_URL is required to create Stripe onboarding links",
+      }, 500);
+    }
+
     const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
     const accountLink = await stripe.accountLinks.create({
       account: affiliate.stripe_connect_account_id,
-      refresh_url: `${siteUrl}/affiliate/payouts/refresh`,
       return_url: `${siteUrl}/affiliate/payouts/return`,
+      refresh_url: `${siteUrl}/affiliate/payouts/refresh`,
       type: "account_onboarding",
     });
 
     return json({ url: accountLink.url });
   } catch (err) {
-    console.error("[create-affiliate-connect-onboarding-link] failed", err?.message || err);
-    return json({ error: "Unable to create Stripe onboarding link" }, 500);
+    const stripeError = getStripeErrorDiagnostics(err);
+    console.error("[create-affiliate-connect-onboarding-link] failed", stripeError);
+    return json({
+      error: "Unable to create Stripe onboarding link",
+      stripe_error: stripeError,
+    }, 500);
   }
 });
