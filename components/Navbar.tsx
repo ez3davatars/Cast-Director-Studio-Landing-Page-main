@@ -17,6 +17,7 @@ const Navbar: React.FC<NavbarProps> = ({
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isOnDashboard = typeof window !== 'undefined' && window.location.pathname === '/account';
+  const isOnAffiliateDashboard = typeof window !== 'undefined' && window.location.pathname === '/affiliate';
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -88,6 +89,14 @@ const Navbar: React.FC<NavbarProps> = ({
                     Dashboard
                   </a>
                 )}
+                {!isOnAffiliateDashboard && (
+                  <a
+                    href="/affiliate"
+                    className="text-[13px] font-semibold uppercase tracking-[0.1em] text-slate-400 hover:text-white transition-colors"
+                  >
+                    Affiliate
+                  </a>
+                )}
                 <button
                   type="button"
                   onClick={handleSignOut}
@@ -140,6 +149,15 @@ const Navbar: React.FC<NavbarProps> = ({
                       className="text-sm uppercase tracking-wide text-nano-text hover:text-white transition-colors"
                     >
                       Dashboard
+                    </a>
+                  )}
+                  {!isOnAffiliateDashboard && (
+                    <a
+                      href="/affiliate"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="text-sm uppercase tracking-wide text-nano-text hover:text-white transition-colors"
+                    >
+                      Affiliate
                     </a>
                   )}
                   <button

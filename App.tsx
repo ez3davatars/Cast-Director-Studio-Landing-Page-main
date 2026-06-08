@@ -15,6 +15,7 @@ import Footer from './components/Footer';
 import AuthModal from './components/AuthModal';
 import ProtectedRoute from './components/ProtectedRoute';
 import AccountDashboard from './components/AccountDashboard';
+import AffiliateDashboard from './pages/affiliate/Dashboard';
 import AdminRoute from './components/AdminRoute';
 import AdminLayout from './components/AdminLayout';
 import AdminDashboard from './pages/admin/Dashboard';
@@ -190,6 +191,17 @@ function App() {
               <ProtectedRoute session={session}>
                 <Navbar session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
                 {session && <AccountDashboard session={session} />}
+                <Footer />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/affiliate"
+            element={
+              <ProtectedRoute session={session}>
+                <Navbar session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
+                {session && <AffiliateDashboard session={session} />}
                 <Footer />
               </ProtectedRoute>
             }
