@@ -10,6 +10,7 @@ interface AffiliateDashboardProps {
 const money = (cents: number | null | undefined) => `$${((cents ?? 0) / 100).toFixed(2)}`;
 const date = (value: string | null | undefined) => value ? new Date(value).toLocaleDateString() : '-';
 const dateTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '-';
+const shortRef = (value: string | null | undefined) => value ? `${value.slice(0, 12)}...` : '-';
 
 const panelClass = 'rounded-sm border border-nano-border bg-black/40 p-5';
 
@@ -139,7 +140,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
             .limit(100),
           supabase
             .from('payout_items')
-            .select('id, amount_cents, status, paypal_email, payment_provider, payment_method, payment_destination, payment_reference, paid_at, paid_notes, payout_batches(id, status, paid_at, created_at)')
+            .select('id, amount_cents, status, paypal_email, payment_provider, payment_method, payment_destination, payment_reference, paid_at, paid_notes, stripe_transfer_id, stripe_transfer_status, stripe_payout_id, stripe_payout_status, stripe_payout_arrival_date, payout_batches(id, status, paid_at, created_at)')
             .eq('affiliate_id', affiliateRow.id)
             .order('created_at', { ascending: false })
             .limit(50),
@@ -458,20 +459,31 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                       <th className="p-3">Status</th>
                       <th className="p-3 text-right">Amount</th>
                       <th className="p-3">Method</th>
+                      <th className="p-3">Transfer Status</th>
+                      <th className="p-3">Bank Payout Status</th>
                       <th className="p-3">Reference</th>
                       <th className="p-3">Paid At</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {payouts.map(row => (
-                      <tr key={row.id} className="border-t border-nano-border/60">
-                        <td className="p-3 text-sm text-white">{row.status}</td>
-                        <td className="p-3 text-sm text-white font-mono text-right">{money(row.amount_cents)}</td>
-                        <td className="p-3 text-sm text-nano-text">{row.payment_method || row.payment_provider || 'manual'}</td>
-                        <td className="p-3 text-sm text-nano-text font-mono">{row.payment_reference || '-'}</td>
-                        <td className="p-3 text-sm text-nano-text font-mono">{dateTime(row.paid_at)}</td>
-                      </tr>
-                    ))}
+                    {payouts.map(row => {
+                      const isStripeConnect = row.payment_method === 'stripe_connect' || row.payment_provider === 'stripe' || row.stripe_transfer_id;
+                      return (
+                        <tr key={row.id} className="border-t border-nano-border/60">
+                          <td className="p-3 text-sm text-white">{row.status}</td>
+                          <td className="p-3 text-sm text-white font-mono text-right">{money(row.amount_cents)}</td>
+                          <td className="p-3 text-sm text-nano-text">
+                            {isStripeConnect ? 'Direct deposit through Stripe' : (row.payment_method || row.payment_provider || 'manual')}
+                          </td>
+                          <td className="p-3 text-sm text-nano-text font-mono">{row.stripe_transfer_status || '-'}</td>
+                          <td className="p-3 text-sm text-nano-text font-mono">{row.stripe_payout_status || '-'}</td>
+                          <td className="p-3 text-sm text-nano-text font-mono" title={row.payment_reference || row.stripe_transfer_id || row.stripe_payout_id || ''}>
+                            {shortRef(row.payment_reference || row.stripe_transfer_id || row.stripe_payout_id)}
+                          </td>
+                          <td className="p-3 text-sm text-nano-text font-mono">{dateTime(row.paid_at)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

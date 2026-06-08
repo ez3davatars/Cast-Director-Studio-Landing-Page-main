@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Loader2, DollarSign, CheckCircle, X, FileText } from 'lucide-react';
+import { Loader2, DollarSign, CheckCircle, X, FileText, Send } from 'lucide-react';
 
 const BATCH_STATUS_COLORS: Record<string, string> = {
   draft: 'text-nano-text bg-white/5 border border-nano-border',
@@ -18,7 +18,7 @@ type PayoutDisplayState =
   | 'Manual payout'
   | 'Stripe Connect onboarding required'
   | 'Stripe Connect ready'
-  | 'Transfer created'
+  | 'Transferred to Stripe account'
   | 'Payout pending'
   | 'Paid'
   | 'Failed';
@@ -52,7 +52,7 @@ const getPayoutDisplayState = (item: any): PayoutDisplayState => {
   }
   if (item.status === 'paid') return 'Paid';
   if (item.stripe_payout_status && !['paid', 'failed', 'canceled'].includes(item.stripe_payout_status)) return 'Payout pending';
-  if (item.stripe_transfer_id) return 'Transfer created';
+  if (item.stripe_transfer_id) return 'Transferred to Stripe account';
 
   const affiliate = Array.isArray(item.affiliates) ? item.affiliates[0] : item.affiliates;
   if (affiliate?.payout_method === 'stripe_connect') {
@@ -83,6 +83,9 @@ const PayoutsAdmin: React.FC = () => {
 
   const [batchActionId, setBatchActionId] = useState<string | null>(null);
   const [batchActionErr, setBatchActionErr] = useState<string | null>(null);
+  const [stripeProcessId, setStripeProcessId] = useState<string | null>(null);
+  const [stripeProcessErr, setStripeProcessErr] = useState<string | null>(null);
+  const [stripeProcessOk, setStripeProcessOk] = useState<string | null>(null);
 
   const [manualPaymentItem, setManualPaymentItem] = useState<any | null>(null);
   const [manualPaymentBatch, setManualPaymentBatch] = useState<any | null>(null);
@@ -290,6 +293,35 @@ const PayoutsAdmin: React.FC = () => {
       setBatchActionErr(`${batchId}: ${err.message}`);
     } finally {
       setBatchActionId(null);
+    }
+  };
+
+  const handleSendStripeConnectPayouts = async (batchId: string, payoutItemIds?: string[]) => {
+    const actionId = payoutItemIds?.length === 1 ? payoutItemIds[0] : batchId;
+    setStripeProcessId(actionId);
+    setStripeProcessErr(null);
+    setStripeProcessOk(null);
+
+    try {
+      const { data, error: processErr } = await supabase.functions.invoke('process-affiliate-payout-batch', {
+        body: {
+          payout_batch_id: batchId,
+          payout_item_ids: payoutItemIds,
+        },
+      });
+
+      if (processErr) throw new Error(processErr.message);
+
+      const results = data?.results || [];
+      const sent = results.filter((row: any) => row.status === 'sent').length;
+      const failed = results.filter((row: any) => row.status === 'failed').length;
+      const skipped = results.length - sent - failed;
+      setStripeProcessOk(`Stripe Connect processing complete: ${sent} sent, ${failed} failed, ${skipped} skipped.`);
+      setRefreshKey(k => k + 1);
+    } catch (err: any) {
+      setStripeProcessErr(err.message || 'Failed to send Stripe Connect payout.');
+    } finally {
+      setStripeProcessId(null);
     }
   };
 
@@ -541,6 +573,16 @@ const PayoutsAdmin: React.FC = () => {
               {batchActionErr}
             </div>
           )}
+          {stripeProcessErr && (
+            <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded font-mono text-sm mb-4">
+              {stripeProcessErr}
+            </div>
+          )}
+          {stripeProcessOk && (
+            <div className="bg-green-500/10 border border-green-500/40 text-green-400 p-4 rounded font-mono text-sm mb-4">
+              {stripeProcessOk}
+            </div>
+          )}
 
           {loadingBatches ? (
             <div className="space-y-2 animate-pulse">
@@ -569,6 +611,17 @@ const PayoutsAdmin: React.FC = () => {
                     batches.map(batch => {
                       const payoutItems = Array.isArray(batch.payout_items) ? batch.payout_items : [];
                       const isActing = batchActionId === batch.id;
+                      const eligibleStripeItems = payoutItems.filter((item: any) => {
+                        const affiliate = Array.isArray(item.affiliates) ? item.affiliates[0] : item.affiliates;
+                        return batch.status === 'approved'
+                          && ['pending', 'failed'].includes(item.status)
+                          && !item.stripe_transfer_id
+                          && affiliate?.payout_method === 'stripe_connect'
+                          && affiliate?.stripe_connect_account_id
+                          && affiliate?.stripe_connect_payouts_enabled
+                          && item.amount_cents > 0;
+                      });
+                      const isStripeBatchProcessing = stripeProcessId === batch.id;
                       return (
                         <React.Fragment key={batch.id}>
                           <tr className="border-b border-nano-border/50 hover:bg-white/5">
@@ -605,6 +658,16 @@ const PayoutsAdmin: React.FC = () => {
                                     </button>
                                   </>
                                 )}
+                                {batch.status === 'approved' && eligibleStripeItems.length > 0 && (
+                                  <button
+                                    onClick={() => handleSendStripeConnectPayouts(batch.id)}
+                                    disabled={Boolean(stripeProcessId)}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/30 rounded hover:bg-nano-yellow/20 transition-colors disabled:opacity-40"
+                                  >
+                                    {isStripeBatchProcessing ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                                    Send eligible Stripe Connect payouts
+                                  </button>
+                                )}
                                 {(batch.status === 'paid' || batch.status === 'cancelled') && (
                                   <span className="text-[10px] text-nano-text italic">
                                     {batch.status === 'paid'
@@ -638,6 +701,12 @@ const PayoutsAdmin: React.FC = () => {
                                       const isStripeConnect = affiliate?.payout_method === 'stripe_connect';
                                       const isStripeConnectReady = isStripeConnect && affiliate?.stripe_connect_account_id && affiliate?.stripe_connect_payouts_enabled;
                                       const canRecordPayment = !isStripeConnect && batch.status === 'approved' && item.status === 'pending' && item.amount_cents > 0;
+                                      const canSendStripeConnect = isStripeConnectReady
+                                        && batch.status === 'approved'
+                                        && ['pending', 'failed'].includes(item.status)
+                                        && !item.stripe_transfer_id
+                                        && item.amount_cents > 0;
+                                      const isStripeItemProcessing = stripeProcessId === item.id;
                                       const payoutState = getPayoutDisplayState(item);
                                       return (
                                         <tr key={item.id} className="border-t border-nano-border/40">
@@ -666,9 +735,15 @@ const PayoutsAdmin: React.FC = () => {
                                           </td>
                                           <td className="px-4 py-3 text-xs text-nano-text">
                                             <div>{item.payment_provider || (affiliate?.payout_method === 'stripe_connect' ? 'stripe_connect' : 'manual')}</div>
-                                            <div className="text-[10px] text-gray-500">{item.payment_method || item.stripe_transfer_status || '-'}</div>
+                                            <div className="text-[10px] text-gray-500">{item.payment_method || '-'}</div>
+                                            {item.stripe_transfer_status && (
+                                              <div className="text-[10px] text-nano-yellow">Transfer: {item.stripe_transfer_status}</div>
+                                            )}
+                                            {item.stripe_payout_status && (
+                                              <div className="text-[10px] text-green-400">Bank payout status: {item.stripe_payout_status}</div>
+                                            )}
                                           </td>
-                                          <td className="px-4 py-3 text-xs text-white font-mono max-w-[160px] truncate" title={item.payment_reference || ''}>
+                                          <td className="px-4 py-3 text-xs text-white font-mono max-w-[160px] truncate" title={item.payment_reference || item.stripe_transfer_id || item.stripe_payout_id || ''}>
                                             {item.payment_reference || item.stripe_payout_id || item.stripe_transfer_id || '-'}
                                           </td>
                                           <td className="px-4 py-3 text-[11px] text-nano-text font-mono">
@@ -685,12 +760,23 @@ const PayoutsAdmin: React.FC = () => {
                                               >
                                                 Record Manual Payment
                                               </button>
-                                            ) : item.status === 'pending' && isStripeConnectReady ? (
-                                              <span className="inline-block rounded border border-nano-yellow/30 bg-nano-yellow/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-nano-yellow">
-                                                Stripe Connect ready
+                                            ) : canSendStripeConnect ? (
+                                              <button
+                                                onClick={() => handleSendStripeConnectPayouts(batch.id, [item.id])}
+                                                disabled={Boolean(stripeProcessId)}
+                                                className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/30 rounded hover:bg-nano-yellow/20 transition-colors disabled:opacity-40"
+                                              >
+                                                {isStripeItemProcessing ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                                                Send via Stripe Connect
+                                              </button>
+                                            ) : item.stripe_transfer_id ? (
+                                              <span className="text-[10px] text-nano-yellow font-mono">
+                                                Transferred to Stripe account
                                               </span>
                                             ) : item.status === 'pending' && isStripeConnect ? (
                                               <span className="text-[10px] text-orange-300 font-mono">Stripe setup incomplete</span>
+                                            ) : item.status === 'failed' && isStripeConnect ? (
+                                              <span className="text-[10px] text-red-400 font-mono">Failed</span>
                                             ) : item.status === 'paid' ? (
                                               <span className="text-[10px] text-green-400 font-mono">{item.payment_reference || 'Paid'}</span>
                                             ) : (
