@@ -31,6 +31,17 @@ const PAYOUT_STATUS_COLORS: Record<string, string> = {
 const fmt = (cents: number | null | undefined) =>
   `$${((cents ?? 0) / 100).toFixed(2)}`;
 
+const requirementsSummary = (value: any) => {
+  if (!value) return 'None';
+  const requirements = Array.isArray(value)
+    ? value
+    : Array.isArray(value.currently_due)
+      ? value.currently_due
+      : Object.values(value).flat();
+  const clean = requirements.filter(Boolean);
+  return clean.length === 0 ? 'None' : `${clean.length} due`;
+};
+
 type Tab = 'overview' | 'links' | 'commissions' | 'payouts' | 'notes';
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
@@ -401,6 +412,23 @@ const AffiliateDetailAdmin: React.FC = () => {
                 ['User ID',       affiliate.user_id],
                 ['PayPal Email',  affiliate.paypal_email || '—'],
                 ['Created',       affiliate.created_at ? new Date(affiliate.created_at).toLocaleString() : '—'],
+              ].map(([label, val]) => (
+                <div key={label as string} className="flex justify-between text-sm gap-4">
+                  <span className="text-nano-text flex-shrink-0">{label}</span>
+                  <span className="text-white font-mono text-[11px] truncate text-right">{val as string}</span>
+                </div>
+              ))}
+            </div>
+            <div className="bg-black border border-nano-border rounded-lg p-5 space-y-3 md:col-span-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-nano-text mb-3">Payout Setup</h3>
+              {[
+                ['Contact Email', affiliate.contact_email || '—'],
+                ['Payout Method', affiliate.payout_method || 'manual'],
+                ['Stripe Connect Account', affiliate.stripe_connect_account_id || '—'],
+                ['Onboarding Status', affiliate.stripe_connect_onboarding_status || 'not_started'],
+                ['Payouts Enabled', affiliate.stripe_connect_payouts_enabled ? 'yes' : 'no'],
+                ['Charges Enabled', affiliate.stripe_connect_charges_enabled ? 'yes' : 'no'],
+                ['Requirements Due', requirementsSummary(affiliate.stripe_connect_requirements_due)],
               ].map(([label, val]) => (
                 <div key={label as string} className="flex justify-between text-sm gap-4">
                   <span className="text-nano-text flex-shrink-0">{label}</span>

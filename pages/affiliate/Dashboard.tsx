@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { Banknote, CheckCircle, Copy, FileText, Link as LinkIcon, Loader2, ShieldAlert, UserCheck } from 'lucide-react';
+import { Banknote, CheckCircle, Copy, CreditCard, FileText, Link as LinkIcon, Loader2, RefreshCw, ShieldAlert, UserCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 interface AffiliateDashboardProps {
@@ -21,6 +21,23 @@ const getPublicSiteBaseUrl = () => {
 
 const buildTrackingUrl = (code: string) => `${getPublicSiteBaseUrl()}/a/${code}`;
 
+const getRequirementsDue = (value: any): string[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (Array.isArray(value.currently_due)) return value.currently_due.filter(Boolean);
+  if (Array.isArray(value.eventually_due)) return value.eventually_due.filter(Boolean);
+  if (typeof value === 'object') return Object.values(value).flat().filter(Boolean) as string[];
+  return [];
+};
+
+const getConnectButtonLabel = (affiliate: any) => {
+  const requirementsDue = getRequirementsDue(affiliate?.stripe_connect_requirements_due);
+  const isReady = affiliate?.stripe_connect_account_id && affiliate?.stripe_connect_payouts_enabled && requirementsDue.length === 0;
+  if (isReady) return 'Manage payout account';
+  if (affiliate?.stripe_connect_account_id) return 'Continue setup';
+  return 'Set up direct deposit through Stripe';
+};
+
 const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +49,11 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [payouts, setPayouts] = useState<any[]>([]);
   const [assets, setAssets] = useState<any[]>([]);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [connectActionLoading, setConnectActionLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectMessage, setConnectMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,7 +160,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
 
     loadAffiliateDashboard();
     return () => { cancelled = true; };
-  }, [session.user.id]);
+  }, [session.user.id, refreshKey]);
 
   const statCards = useMemo(() => ([
     ['Total clicks', stats?.clicks_count ?? 0],
@@ -155,6 +177,57 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
     await navigator.clipboard.writeText(fullUrl);
     setCopiedLinkId(link.id);
     setTimeout(() => setCopiedLinkId(null), 1600);
+  };
+
+  const handleStripeConnectSetup = async () => {
+    if (!affiliate) return;
+    setConnectActionLoading(true);
+    setConnectError(null);
+    setConnectMessage(null);
+
+    try {
+      if (!affiliate.stripe_connect_account_id) {
+        const { data, error: createErr } = await supabase.functions.invoke('create-affiliate-connect-account', {
+          body: {},
+        });
+        if (createErr) throw new Error(createErr.message);
+        setAffiliate((prev: any) => ({
+          ...prev,
+          stripe_connect_account_id: data?.stripe_connect_account_id || prev?.stripe_connect_account_id,
+          stripe_connect_onboarding_status: data?.stripe_connect_onboarding_status || prev?.stripe_connect_onboarding_status,
+          payout_method: 'stripe_connect',
+        }));
+      }
+
+      const { data, error: linkErr } = await supabase.functions.invoke('create-affiliate-connect-onboarding-link', {
+        body: {},
+      });
+      if (linkErr) throw new Error(linkErr.message);
+      if (!data?.url) throw new Error('Stripe onboarding link was not returned.');
+
+      window.location.assign(data.url);
+    } catch (err: any) {
+      setConnectError(err.message || 'Unable to start Stripe direct deposit setup.');
+      setConnectActionLoading(false);
+    }
+  };
+
+  const handleSyncConnectStatus = async () => {
+    setSyncLoading(true);
+    setConnectError(null);
+    setConnectMessage(null);
+    try {
+      const { error: syncErr } = await supabase.functions.invoke('sync-affiliate-connect-account', {
+        body: {},
+      });
+      if (syncErr) throw new Error(syncErr.message);
+      setConnectMessage('Stripe payout account status refreshed.');
+      setRefreshKey(k => k + 1);
+    } catch (err: any) {
+      setConnectError(err.message || 'Unable to refresh Stripe payout account status.');
+    } finally {
+      setSyncLoading(false);
+    }
   };
 
   if (loading) {
@@ -400,18 +473,91 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
 
           <section className={panelClass}>
             <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Payout Setup</h3>
-            <div className="flex items-start gap-3">
-              <Banknote size={20} className="text-nano-yellow shrink-0 mt-0.5" />
-              <div>
-                <div className="text-sm text-white font-bold">Current method: {affiliate.payout_method || 'manual'}</div>
-                <p className="text-sm text-nano-text mt-2">
-                  {(affiliate.payout_method || 'manual') === 'manual'
-                    ? 'Manual payout details are managed by Cast Director Studio.'
-                    : 'Direct deposit through Stripe Connect coming soon.'}
-                </p>
-                {affiliate.stripe_connect_account_id && (
-                  <p className="text-xs text-nano-text mt-2">Direct deposit through Stripe Connect coming soon.</p>
-                )}
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4">
+              <div className="rounded-sm border border-nano-border bg-black/40 p-4">
+                <div className="flex items-start gap-3">
+                  <Banknote size={20} className="text-nano-yellow shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-sm text-white font-bold">Manual payout</div>
+                    <p className="text-sm text-nano-text mt-2">
+                      Manual payout details are managed by Cast Director Studio.
+                    </p>
+                    {(affiliate.payout_method || 'manual') === 'manual' && (
+                      <span className="inline-block mt-3 rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-nano-yellow">
+                        Current method
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-sm border border-nano-border bg-black/40 p-4">
+                <div className="flex items-start gap-3">
+                  <CreditCard size={20} className="text-nano-yellow shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-white font-bold">Direct deposit through Stripe</div>
+                    <p className="text-sm text-nano-text mt-2">
+                      Set up secure direct deposits to your bank account or debit card through Stripe.
+                    </p>
+
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {[
+                        ['Current method', affiliate.payout_method || 'manual'],
+                        ['Onboarding', affiliate.stripe_connect_onboarding_status || 'not started'],
+                        ['Payouts enabled', affiliate.stripe_connect_payouts_enabled ? 'yes' : 'no'],
+                        ['Charges enabled', affiliate.stripe_connect_charges_enabled ? 'yes' : 'no'],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-sm border border-nano-border bg-black/30 p-3">
+                          <div className="text-[10px] uppercase tracking-widest text-nano-text">{label}</div>
+                          <div className="mt-1 font-mono text-white">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 rounded-sm border border-nano-border bg-black/30 p-3 text-xs">
+                      <div className="text-[10px] uppercase tracking-widest text-nano-text">Requirements due</div>
+                      <div className="mt-1 text-nano-text">
+                        {getRequirementsDue(affiliate.stripe_connect_requirements_due).length === 0
+                          ? 'None'
+                          : `${getRequirementsDue(affiliate.stripe_connect_requirements_due).length} item(s) need attention`}
+                      </div>
+                    </div>
+
+                    {connectError && (
+                      <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 p-3 text-xs font-mono text-red-400">
+                        {connectError}
+                      </div>
+                    )}
+                    {connectMessage && (
+                      <div className="mt-3 rounded-sm border border-green-500/30 bg-green-500/10 p-3 text-xs font-mono text-green-400">
+                        {connectMessage}
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={handleStripeConnectSetup}
+                        disabled={connectActionLoading}
+                        className="inline-flex items-center justify-center gap-2 rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow transition-colors hover:bg-nano-yellow/20 disabled:opacity-50"
+                      >
+                        {connectActionLoading ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
+                        {connectActionLoading ? 'Opening Stripe...' : getConnectButtonLabel(affiliate)}
+                      </button>
+                      {affiliate.stripe_connect_account_id && (
+                        <button
+                          type="button"
+                          onClick={handleSyncConnectStatus}
+                          disabled={syncLoading}
+                          className="inline-flex items-center justify-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                        >
+                          {syncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          Refresh status
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </section>

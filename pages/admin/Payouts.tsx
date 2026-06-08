@@ -635,7 +635,9 @@ const PayoutsAdmin: React.FC = () => {
                                   <tbody>
                                     {payoutItems.map((item: any) => {
                                       const affiliate = Array.isArray(item.affiliates) ? item.affiliates[0] : item.affiliates;
-                                      const canRecordPayment = batch.status === 'approved' && item.status === 'pending' && item.amount_cents > 0;
+                                      const isStripeConnect = affiliate?.payout_method === 'stripe_connect';
+                                      const isStripeConnectReady = isStripeConnect && affiliate?.stripe_connect_account_id && affiliate?.stripe_connect_payouts_enabled;
+                                      const canRecordPayment = !isStripeConnect && batch.status === 'approved' && item.status === 'pending' && item.amount_cents > 0;
                                       const payoutState = getPayoutDisplayState(item);
                                       return (
                                         <tr key={item.id} className="border-t border-nano-border/40">
@@ -683,6 +685,12 @@ const PayoutsAdmin: React.FC = () => {
                                               >
                                                 Record Manual Payment
                                               </button>
+                                            ) : item.status === 'pending' && isStripeConnectReady ? (
+                                              <span className="inline-block rounded border border-nano-yellow/30 bg-nano-yellow/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-nano-yellow">
+                                                Stripe Connect ready
+                                              </span>
+                                            ) : item.status === 'pending' && isStripeConnect ? (
+                                              <span className="text-[10px] text-orange-300 font-mono">Stripe setup incomplete</span>
                                             ) : item.status === 'paid' ? (
                                               <span className="text-[10px] text-green-400 font-mono">{item.payment_reference || 'Paid'}</span>
                                             ) : (
