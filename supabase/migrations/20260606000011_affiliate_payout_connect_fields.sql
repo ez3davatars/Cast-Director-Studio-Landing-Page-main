@@ -10,7 +10,7 @@ ALTER TABLE public.payout_items
   ADD COLUMN IF NOT EXISTS payment_method text,
   ADD COLUMN IF NOT EXISTS payment_destination text,
   ADD COLUMN IF NOT EXISTS payment_reference text,
-  ADD COLUMN IF NOT EXISTS paid_by uuid REFERENCES auth.users(id),
+  ADD COLUMN IF NOT EXISTS paid_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS paid_at timestamptz,
   ADD COLUMN IF NOT EXISTS paid_notes text,
   ADD COLUMN IF NOT EXISTS stripe_transfer_id text,
