@@ -19,12 +19,14 @@ const PayoutConnectReturn: React.FC<PayoutConnectReturnProps> = ({ mode }) => {
 
     const syncStatus = async () => {
       try {
-        const { error: syncErr } = await supabase.functions.invoke('sync-affiliate-connect-account', {
+        const { data, error: syncErr } = await supabase.functions.invoke('sync-affiliate-connect-account', {
           body: {},
         });
         if (syncErr) throw new Error(syncErr.message);
         if (cancelled) return;
-        setMessage(mode === 'refresh' ? 'Setup session refreshed.' : 'Stripe payout account status updated.');
+        setMessage(data?.reset
+          ? 'Your previous Stripe direct deposit setup was removed. Please set it up again.'
+          : mode === 'refresh' ? 'Setup session refreshed.' : 'Stripe payout account status updated.');
         window.setTimeout(() => {
           if (!cancelled) navigate('/affiliate', { replace: true });
         }, 1200);

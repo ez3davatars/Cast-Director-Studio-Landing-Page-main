@@ -26,8 +26,10 @@ const isMissingStripeAccountError = (err: any) =>
   /No such account/i.test(err?.message || "");
 
 const stripeErrorLog = (err: any) => ({
+  type: err?.type || err?.raw?.type || null,
   code: err?.code || err?.raw?.code || null,
   message: err?.message || "Stripe request failed",
+  requestId: err?.requestId || err?.raw?.requestId || err?.raw?.request_id || null,
 });
 
 serve(async (req: Request) => {
@@ -97,7 +99,7 @@ serve(async (req: Request) => {
 
       return json({
         reset: true,
-        message: "Stripe direct deposit account was removed. Please set it up again.",
+        message: "Stripe direct deposit setup was removed. Please set it up again.",
       });
     }
 

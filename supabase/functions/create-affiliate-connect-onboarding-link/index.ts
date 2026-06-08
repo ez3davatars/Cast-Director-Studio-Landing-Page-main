@@ -79,15 +79,26 @@ serve(async (req: Request) => {
       console.warn("[create-affiliate-connect-onboarding-link] missing saved account", {
         affiliate_id: affiliate.id,
         stripe_connect_account_id: affiliate.stripe_connect_account_id,
-        stripe_error: {
-          code: stripeError.code,
-          message: stripeError.message,
-        },
+        stripe_error: stripeError,
       });
+
+      const { error: resetError } = await supabaseAdmin
+        .from("affiliates")
+        .update({
+          payout_method: "manual",
+          stripe_connect_account_id: null,
+          stripe_connect_onboarding_status: "not_started",
+          stripe_connect_payouts_enabled: false,
+          stripe_connect_charges_enabled: false,
+          stripe_connect_requirements_due: [],
+        })
+        .eq("id", affiliate.id);
+
+      if (resetError) return json({ error: resetError.message }, 500);
 
       return json({
         reset: true,
-        error: "Stripe direct deposit account was removed. Please set it up again.",
+        error: "Stripe direct deposit setup was removed. Please set it up again.",
         stripe_error: stripeError,
       }, 409);
     }
