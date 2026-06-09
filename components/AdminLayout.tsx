@@ -17,6 +17,7 @@ import {
   UserCheck,
   Banknote,
   LayoutDashboard,
+  FileText,
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -180,6 +181,19 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
           >
             <Banknote size={18} />
             <span className="font-medium text-sm">Payouts</span>
+          </NavLink>
+          <NavLink
+            to="/admin/affiliate-assets"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`
+            }
+          >
+            <FileText size={18} />
+            <span className="font-medium text-sm">Affiliate Assets</span>
           </NavLink>
         </nav>
 
