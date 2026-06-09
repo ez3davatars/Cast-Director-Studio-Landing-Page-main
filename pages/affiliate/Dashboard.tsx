@@ -23,6 +23,16 @@ const getAffiliateTransferStatus = (row: any) => {
   if (row.status === 'failed' && !row.stripe_transfer_id) return 'Transfer failed';
   return row.stripe_transfer_status || '-';
 };
+const getAffiliatePayoutMethodLabel = (row: any) => {
+  const isStripeConnect =
+    row.payment_method === 'stripe_connect' ||
+    row.payment_provider === 'stripe' ||
+    Boolean(row.stripe_transfer_id) ||
+    Boolean(row.stripe_transfer_status) ||
+    Boolean(row.payout_failure_code);
+
+  return isStripeConnect ? 'Direct deposit through Stripe' : 'Manual payout';
+};
 
 const panelClass = 'rounded-sm border border-nano-border bg-black/40 p-5';
 
@@ -493,13 +503,12 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                   </thead>
                   <tbody>
                     {payouts.map(row => {
-                      const isStripeConnect = row.payment_method === 'stripe_connect' || row.payment_provider === 'stripe' || row.stripe_transfer_id;
                       return (
                         <tr key={row.id} className="border-t border-nano-border/60">
                           <td className="p-3 text-sm text-white">{getAffiliatePayoutStatus(row)}</td>
                           <td className="p-3 text-sm text-white font-mono text-right">{money(row.amount_cents)}</td>
                           <td className="p-3 text-sm text-nano-text">
-                            {isStripeConnect ? 'Direct deposit through Stripe' : (row.payment_method || row.payment_provider || 'manual')}
+                            {getAffiliatePayoutMethodLabel(row)}
                           </td>
                           <td className="p-3 text-sm text-nano-text font-mono">{getAffiliateTransferStatus(row)}</td>
                           <td className="p-3 text-sm text-nano-text font-mono">{row.stripe_payout_status || '-'}</td>

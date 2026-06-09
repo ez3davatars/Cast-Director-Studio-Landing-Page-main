@@ -170,6 +170,19 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
             <span className="font-medium text-sm">Affiliates</span>
           </NavLink>
           <NavLink
+            to="/admin/affiliate-program"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-nano-yellow/10 text-nano-yellow border border-nano-yellow/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`
+            }
+          >
+            <FileText size={18} />
+            <span className="font-medium text-sm">Affiliate Program</span>
+          </NavLink>
+          <NavLink
             to="/admin/payouts"
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
