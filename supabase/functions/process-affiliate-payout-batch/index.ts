@@ -73,7 +73,7 @@ serve(async (req: Request) => {
       .from("payout_items")
       .select(`
         id,
-        payout_batch_id,
+        batch_id,
         affiliate_id,
         amount_cents,
         status,
@@ -86,7 +86,7 @@ serve(async (req: Request) => {
           stripe_connect_payouts_enabled
         )
       `)
-      .eq("payout_batch_id", payoutBatchId);
+      .eq("batch_id", payoutBatchId);
 
     if (payoutItemIds) itemsQuery = itemsQuery.in("id", payoutItemIds);
 
@@ -226,7 +226,7 @@ serve(async (req: Request) => {
     const { data: batchItems } = await supabaseAdmin
       .from("payout_items")
       .select("status")
-      .eq("payout_batch_id", payoutBatchId);
+      .eq("batch_id", payoutBatchId);
 
     const statuses = (batchItems || []).map((row: any) => row.status);
     if (statuses.length > 0 && statuses.every((status: string) => ["transferred", "paid"].includes(status))) {
