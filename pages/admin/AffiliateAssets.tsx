@@ -343,10 +343,10 @@ const AffiliateAssetsAdmin: React.FC = () => {
   const renderPreview = (asset: any) => {
     const url = asset.thumbnail_url || getAssetUrl(asset);
     if (url && isImageMime(asset.mime_type)) {
-      return <img src={url} alt="" className="h-full w-full object-cover" />;
+      return <img src={url} alt="" className="max-h-full max-w-full object-contain" />;
     }
     if (url && asset.type === 'logo') {
-      return <img src={url} alt="" className="h-full w-full object-contain bg-white/5 p-4" />;
+      return <img src={url} alt="" className="max-h-full max-w-full object-contain" />;
     }
     const Icon = url ? Download : FileText;
     return <Icon size={28} className="text-nano-yellow" />;
@@ -473,7 +473,7 @@ const AffiliateAssetsAdmin: React.FC = () => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {assets.map(asset => (
             <div key={asset.id} className="rounded-lg border border-nano-border bg-black/70 overflow-hidden">
-              <div className="flex h-36 items-center justify-center border-b border-nano-border bg-white/[0.03]">
+              <div className="flex h-36 items-center justify-center overflow-hidden border-b border-nano-border bg-black/40 p-3">
                 {renderPreview(asset)}
               </div>
               <div className="p-4">
@@ -562,7 +562,9 @@ const AffiliateAssetsAdmin: React.FC = () => {
                   className={`flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed p-5 text-center ${isDragging ? 'border-nano-yellow bg-nano-yellow/10' : 'border-nano-border bg-black/50'}`}
                 >
                   {previewUrl && selectedFile && isImageMime(selectedFile.type) ? (
-                    <img src={previewUrl} alt="" className="max-h-52 rounded border border-nano-border object-contain" />
+                    <div className="flex h-52 w-full items-center justify-center overflow-hidden rounded border border-nano-border bg-black/40 p-3">
+                      <img src={previewUrl} alt="" className="max-h-full max-w-full object-contain" />
+                    </div>
                   ) : previewUrl && selectedFile ? (
                     <div className="rounded border border-nano-border bg-black p-5">
                       <FileText size={36} className="mx-auto mb-3 text-nano-yellow" />
@@ -570,7 +572,9 @@ const AffiliateAssetsAdmin: React.FC = () => {
                       <div className="mt-1 text-xs text-nano-text">{selectedFile.type || 'Unknown type'} - {formatBytes(selectedFile.size)}</div>
                     </div>
                   ) : editingAsset && getAssetUrl(editingAsset) && isImageMime(editingAsset.mime_type) ? (
-                    <img src={editingAsset.thumbnail_url || getAssetUrl(editingAsset)} alt="" className="max-h-52 rounded border border-nano-border object-contain" />
+                    <div className="flex h-52 w-full items-center justify-center overflow-hidden rounded border border-nano-border bg-black/40 p-3">
+                      <img src={editingAsset.thumbnail_url || getAssetUrl(editingAsset)} alt="" className="max-h-full max-w-full object-contain" />
+                    </div>
                   ) : (
                     <>
                       <UploadCloud size={40} className="mb-3 text-nano-yellow" />

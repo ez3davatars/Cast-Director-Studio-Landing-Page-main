@@ -540,11 +540,11 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                   return (
                     <div key={asset.id} className="overflow-hidden rounded-sm border border-nano-border bg-black/40">
                       {assetUrl && isImageAsset(asset) ? (
-                        <div className="flex h-40 items-center justify-center border-b border-nano-border bg-white/[0.03]">
+                        <div className="flex h-40 items-center justify-center overflow-hidden border-b border-nano-border bg-black/40 p-3">
                           <img
                             src={previewUrl}
                             alt=""
-                            className={asset.type === 'logo' ? 'max-h-full max-w-full object-contain p-5' : 'h-full w-full object-cover'}
+                            className="max-h-full max-w-full object-contain"
                           />
                         </div>
                       ) : (
