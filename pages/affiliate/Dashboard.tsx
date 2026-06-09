@@ -11,6 +11,18 @@ const money = (cents: number | null | undefined) => `$${((cents ?? 0) / 100).toF
 const date = (value: string | null | undefined) => value ? new Date(value).toLocaleDateString() : '-';
 const dateTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '-';
 const shortRef = (value: string | null | undefined) => value ? `${value.slice(0, 12)}...` : '-';
+const getAffiliatePayoutStatus = (row: any) => {
+  const isStripeConnect = row.payment_method === 'stripe_connect' || row.payment_provider === 'stripe' || row.stripe_transfer_id || row.payout_failure_code;
+  if (isStripeConnect && row.status === 'failed' && !row.stripe_transfer_id) {
+    return 'Transfer failed — waiting for admin retry';
+  }
+  return row.status;
+};
+const getAffiliateTransferStatus = (row: any) => {
+  if (row.payout_failure_code === 'balance_insufficient') return 'Platform balance not yet available';
+  if (row.status === 'failed' && !row.stripe_transfer_id) return 'Transfer failed';
+  return row.stripe_transfer_status || '-';
+};
 
 const panelClass = 'rounded-sm border border-nano-border bg-black/40 p-5';
 
@@ -70,6 +82,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [payouts, setPayouts] = useState<any[]>([]);
   const [assets, setAssets] = useState<any[]>([]);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+  const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [connectActionLoading, setConnectActionLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -92,6 +105,9 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
             status,
             commission_rate,
             commission_duration_months,
+            attribution_window_days,
+            payout_hold_days,
+            minimum_payout_cents,
             payout_method,
             paypal_email,
             stripe_connect_account_id,
@@ -140,7 +156,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
             .limit(100),
           supabase
             .from('payout_items')
-            .select('id, amount_cents, status, paypal_email, payment_provider, payment_method, payment_destination, payment_reference, paid_at, paid_notes, stripe_transfer_id, stripe_transfer_status, stripe_payout_id, stripe_payout_status, stripe_payout_arrival_date, payout_batches(id, status, paid_at, created_at)')
+            .select('id, amount_cents, status, paypal_email, payment_provider, payment_method, payment_destination, payment_reference, paid_at, paid_notes, stripe_transfer_id, stripe_transfer_status, stripe_payout_id, stripe_payout_status, stripe_payout_arrival_date, payout_failure_code, payout_failure_message, payout_batches(id, status, paid_at, created_at)')
             .eq('affiliate_id', affiliateRow.id)
             .order('created_at', { ascending: false })
             .limit(50),
@@ -198,6 +214,16 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
     await navigator.clipboard.writeText(fullUrl);
     setCopiedLinkId(link.id);
     setTimeout(() => setCopiedLinkId(null), 1600);
+  };
+
+  const copyAssetValue = async (asset: any, mode: 'url' | 'text') => {
+    const value = mode === 'url'
+      ? asset.public_url || asset.storage_path || ''
+      : asset.description || '';
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopiedAssetId(`${asset.id}:${mode}`);
+    setTimeout(() => setCopiedAssetId(null), 1600);
   };
 
   const handleStripeConnectSetup = async () => {
@@ -470,12 +496,12 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                       const isStripeConnect = row.payment_method === 'stripe_connect' || row.payment_provider === 'stripe' || row.stripe_transfer_id;
                       return (
                         <tr key={row.id} className="border-t border-nano-border/60">
-                          <td className="p-3 text-sm text-white">{row.status}</td>
+                          <td className="p-3 text-sm text-white">{getAffiliatePayoutStatus(row)}</td>
                           <td className="p-3 text-sm text-white font-mono text-right">{money(row.amount_cents)}</td>
                           <td className="p-3 text-sm text-nano-text">
                             {isStripeConnect ? 'Direct deposit through Stripe' : (row.payment_method || row.payment_provider || 'manual')}
                           </td>
-                          <td className="p-3 text-sm text-nano-text font-mono">{row.stripe_transfer_status || '-'}</td>
+                          <td className="p-3 text-sm text-nano-text font-mono">{getAffiliateTransferStatus(row)}</td>
                           <td className="p-3 text-sm text-nano-text font-mono">{row.stripe_payout_status || '-'}</td>
                           <td className="p-3 text-sm text-nano-text font-mono" title={row.payment_reference || row.stripe_transfer_id || row.stripe_payout_id || ''}>
                             {shortRef(row.payment_reference || row.stripe_transfer_id || row.stripe_payout_id)}
@@ -505,14 +531,34 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                         <div className="text-xs text-nano-text uppercase tracking-wider mt-1">{asset.type}</div>
                         {asset.description && <p className="text-sm text-nano-text mt-2">{asset.description}</p>}
                         {(asset.public_url || asset.storage_path) && (
-                          <a
-                            href={asset.public_url || asset.storage_path}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-block mt-3 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:text-nano-gold"
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <a
+                              href={asset.public_url || asset.storage_path}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center justify-center rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
+                            >
+                              Open Asset
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => copyAssetValue(asset, 'url')}
+                              className="inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
+                            >
+                              <Copy size={13} />
+                              {copiedAssetId === `${asset.id}:url` ? 'Copied' : 'Copy Link'}
+                            </button>
+                          </div>
+                        )}
+                        {asset.description && (
+                          <button
+                            type="button"
+                            onClick={() => copyAssetValue(asset, 'text')}
+                            className="mt-2 inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
                           >
-                            Open Asset
-                          </a>
+                            <Copy size={13} />
+                            {copiedAssetId === `${asset.id}:text` ? 'Copied' : 'Copy Text'}
+                          </button>
                         )}
                       </div>
                     </div>
@@ -609,6 +655,36 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section className={panelClass}>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Program Terms</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-sm border border-nano-border bg-black/40 p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  {[
+                    ['Commission rate', `${(Number(affiliate.commission_rate || 0) * 100).toFixed(0)}%`],
+                    ['Commission duration', `${affiliate.commission_duration_months || 0} months`],
+                    ['Attribution window', `${affiliate.attribution_window_days || 0} days`],
+                    ['Payout hold period', `${affiliate.payout_hold_days || 0} days`],
+                    ['Minimum payout', money(affiliate.minimum_payout_cents)],
+                    ['Payout method status', affiliate.payout_method || 'manual'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-sm border border-nano-border bg-black/30 p-3">
+                      <div className="text-[10px] uppercase tracking-widest text-nano-text">{label}</div>
+                      <div className="mt-1 font-mono text-white">{value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-sm border border-nano-border bg-black/40 p-4 space-y-3 text-sm text-nano-text">
+                <p>Refunds, disputes, chargebacks, and reversals may reduce future payable commissions.</p>
+                <p>Direct deposit is handled securely through Stripe. Cast Director Studio does not store bank account details.</p>
+                <p className="text-xs">
+                  Support contact: <span className="text-nano-yellow font-mono">support@castdirectorstudio.com</span>
+                </p>
               </div>
             </div>
           </section>

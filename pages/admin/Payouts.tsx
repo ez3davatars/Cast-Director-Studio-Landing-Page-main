@@ -46,6 +46,55 @@ const toDateTimeLocal = (date: Date) => {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 };
 
+const RETRYABLE_STRIPE_FAILURE_CODES = new Set([
+  'balance_insufficient',
+  'insufficient_funds',
+  'api_connection_error',
+  'api_error',
+  'rate_limit',
+  'lock_timeout',
+]);
+
+const isRetryableStripeFailure = (item: any) =>
+  item.status === 'failed'
+  && !item.stripe_transfer_id
+  && RETRYABLE_STRIPE_FAILURE_CODES.has(item.payout_failure_code || '');
+
+const formatPayoutFailure = (item: any) => {
+  if (item.payout_failure_code === 'balance_insufficient') {
+    return 'Stripe balance is not available yet. Retry after funds clear.';
+  }
+  return item.payout_failure_message || item.payout_failure_code || null;
+};
+
+const truncateId = (value: string | null | undefined) =>
+  value ? `${value.slice(0, 10)}...${value.slice(-4)}` : '-';
+
+const summarizeRequirementsDue = (value: any) => {
+  if (!value) return 'None';
+  const requirements = Array.isArray(value)
+    ? value
+    : Array.isArray(value.currently_due)
+      ? value.currently_due
+      : Object.values(value).flat();
+  const clean = requirements.filter(Boolean);
+  return clean.length === 0 ? 'None' : `${clean.length} due`;
+};
+
+const getPayoutEligibilityLabel = (item: any, affiliate: any) => {
+  if (affiliate?.payout_method !== 'stripe_connect') return 'Manual payout';
+  if (item.stripe_transfer_id) return 'Already transferred';
+  if (item.payout_failure_code === 'balance_insufficient' && isRetryableStripeFailure(item)) {
+    return 'Retry after balance clears';
+  }
+  if (item.status === 'failed') return isRetryableStripeFailure(item) ? 'Stripe Connect ready' : 'Not retryable';
+  if (!affiliate?.stripe_connect_account_id || affiliate?.stripe_connect_payouts_enabled !== true) {
+    return 'Stripe setup incomplete';
+  }
+  if (item.status === 'transferred' || item.status === 'paid') return 'Already transferred';
+  return 'Stripe Connect ready';
+};
+
 const getPayoutDisplayState = (item: any): PayoutDisplayState => {
   if (item.payout_failure_code || item.payout_failure_message || item.stripe_transfer_status === 'failed' || item.stripe_payout_status === 'failed') {
     return 'Failed';
@@ -614,14 +663,24 @@ const PayoutsAdmin: React.FC = () => {
                       const eligibleStripeItems = payoutItems.filter((item: any) => {
                         const affiliate = Array.isArray(item.affiliates) ? item.affiliates[0] : item.affiliates;
                         return batch.status === 'approved'
-                          && ['pending', 'failed'].includes(item.status)
+                          && item.status === 'pending'
                           && !item.stripe_transfer_id
                           && affiliate?.payout_method === 'stripe_connect'
                           && affiliate?.stripe_connect_account_id
                           && affiliate?.stripe_connect_payouts_enabled
                           && item.amount_cents > 0;
                       });
+                      const retryableFailedStripeItems = payoutItems.filter((item: any) => {
+                        const affiliate = Array.isArray(item.affiliates) ? item.affiliates[0] : item.affiliates;
+                        return batch.status === 'approved'
+                          && isRetryableStripeFailure(item)
+                          && affiliate?.payout_method === 'stripe_connect'
+                          && affiliate?.stripe_connect_account_id
+                          && affiliate?.stripe_connect_payouts_enabled
+                          && item.amount_cents > 0;
+                      });
                       const isStripeBatchProcessing = stripeProcessId === batch.id;
+                      const hasRetryableFailures = retryableFailedStripeItems.length > 0;
                       return (
                         <React.Fragment key={batch.id}>
                           <tr className="border-b border-nano-border/50 hover:bg-white/5">
@@ -658,14 +717,14 @@ const PayoutsAdmin: React.FC = () => {
                                     </button>
                                   </>
                                 )}
-                                {batch.status === 'approved' && eligibleStripeItems.length > 0 && (
+                                {batch.status === 'approved' && (eligibleStripeItems.length > 0 || hasRetryableFailures) && (
                                   <button
                                     onClick={() => handleSendStripeConnectPayouts(batch.id)}
                                     disabled={Boolean(stripeProcessId)}
                                     className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/30 rounded hover:bg-nano-yellow/20 transition-colors disabled:opacity-40"
                                   >
                                     {isStripeBatchProcessing ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-                                    Send eligible Stripe Connect payouts
+                                    {hasRetryableFailures ? 'Retry eligible Stripe Connect payouts' : 'Send eligible Stripe Connect payouts'}
                                   </button>
                                 )}
                                 {(batch.status === 'paid' || batch.status === 'cancelled') && (
@@ -703,87 +762,136 @@ const PayoutsAdmin: React.FC = () => {
                                       const canRecordPayment = !isStripeConnect && batch.status === 'approved' && item.status === 'pending' && item.amount_cents > 0;
                                       const canSendStripeConnect = isStripeConnectReady
                                         && batch.status === 'approved'
-                                        && ['pending', 'failed'].includes(item.status)
+                                        && item.status === 'pending'
                                         && !item.stripe_transfer_id
+                                        && item.amount_cents > 0;
+                                      const canRetryStripeConnect = isStripeConnectReady
+                                        && batch.status === 'approved'
+                                        && isRetryableStripeFailure(item)
                                         && item.amount_cents > 0;
                                       const isStripeItemProcessing = stripeProcessId === item.id;
                                       const payoutState = getPayoutDisplayState(item);
+                                      const payoutFailure = formatPayoutFailure(item);
+                                      const eligibilityLabel = getPayoutEligibilityLabel(item, affiliate);
                                       return (
-                                        <tr key={item.id} className="border-t border-nano-border/40">
-                                          <td className="px-4 py-3">
-                                            <div className="font-mono text-xs text-nano-yellow">{affiliate?.code || item.affiliate_id?.slice(0, 8) || '-'}</div>
-                                            <div className="text-[10px] text-nano-text">{affiliate?.contact_email || '-'}</div>
-                                          </td>
-                                          <td className="px-4 py-3 text-right font-mono text-xs text-white">{fmt(item.amount_cents)}</td>
-                                          <td className="px-4 py-3 text-xs text-nano-text">
-                                            <div className={payoutState === 'Failed' ? 'text-red-400' : payoutState === 'Paid' ? 'text-green-400' : 'text-nano-text'}>
-                                              {payoutState}
-                                            </div>
-                                            {payoutState === 'Stripe Connect onboarding required' && (
-                                              <div className="mt-1 text-[10px] text-orange-300">
-                                                {affiliate?.stripe_connect_onboarding_status || 'not_started'}
+                                        <React.Fragment key={item.id}>
+                                          <tr className="border-t border-nano-border/40">
+                                            <td className="px-4 py-3">
+                                              <div className="font-mono text-xs text-nano-yellow">{affiliate?.code || item.affiliate_id?.slice(0, 8) || '-'}</div>
+                                              <div className="text-[10px] text-nano-text">{affiliate?.contact_email || '-'}</div>
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono text-xs text-white">{fmt(item.amount_cents)}</td>
+                                            <td className="px-4 py-3 text-xs text-nano-text">
+                                              <div className={payoutState === 'Failed' ? 'text-red-400' : payoutState === 'Paid' ? 'text-green-400' : 'text-nano-text'}>
+                                                {payoutState}
                                               </div>
-                                            )}
-                                            {item.payout_failure_message && (
-                                              <div className="mt-1 max-w-[180px] truncate text-[10px] text-red-400" title={item.payout_failure_message}>
-                                                {item.payout_failure_message}
+                                              <div className="mt-1 text-[10px] text-nano-yellow">{eligibilityLabel}</div>
+                                              {payoutState === 'Stripe Connect onboarding required' && (
+                                                <div className="mt-1 text-[10px] text-orange-300">
+                                                  {affiliate?.stripe_connect_onboarding_status || 'not_started'}
+                                                </div>
+                                              )}
+                                              {payoutFailure && (
+                                                <div className="mt-1 max-w-[180px] truncate text-[10px] text-red-400" title={payoutFailure}>
+                                                  {payoutFailure}
+                                                </div>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-nano-text font-mono">
+                                              {item.payment_destination || item.stripe_destination_account_id || item.paypal_email || <span className="text-red-400 italic">Missing</span>}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-nano-text">
+                                              <div>{item.payment_provider || (affiliate?.payout_method === 'stripe_connect' ? 'stripe_connect' : 'manual')}</div>
+                                              <div className="text-[10px] text-gray-500">{item.payment_method || '-'}</div>
+                                              {item.stripe_transfer_status && (
+                                                <div className="text-[10px] text-nano-yellow">Transfer: {item.stripe_transfer_status}</div>
+                                              )}
+                                              {item.stripe_payout_status && (
+                                                <div className="text-[10px] text-green-400">Bank payout status: {item.stripe_payout_status}</div>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-white font-mono max-w-[160px] truncate" title={item.payment_reference || item.stripe_transfer_id || item.stripe_payout_id || ''}>
+                                              {item.payment_reference || item.stripe_payout_id || item.stripe_transfer_id || '-'}
+                                            </td>
+                                            <td className="px-4 py-3 text-[11px] text-nano-text font-mono">
+                                              {item.paid_at ? new Date(item.paid_at).toLocaleString() : '-'}
+                                            </td>
+                                            <td className="px-4 py-3 text-[10px] text-nano-text font-mono max-w-[100px] truncate" title={item.paid_by || ''}>
+                                              {item.paid_by ? item.paid_by.slice(0, 8) : '-'}
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                              {canRecordPayment ? (
+                                                <button
+                                                  onClick={() => openManualPaymentModal(batch, item)}
+                                                  className="px-2 py-1 text-[10px] font-bold uppercase text-green-400 bg-green-400/10 border border-green-400/30 rounded hover:bg-green-400/20 transition-colors"
+                                                >
+                                                  Record Manual Payment
+                                                </button>
+                                              ) : canSendStripeConnect ? (
+                                                <button
+                                                  onClick={() => handleSendStripeConnectPayouts(batch.id, [item.id])}
+                                                  disabled={Boolean(stripeProcessId)}
+                                                  className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/30 rounded hover:bg-nano-yellow/20 transition-colors disabled:opacity-40"
+                                                >
+                                                  {isStripeItemProcessing ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                                                  Send via Stripe Connect
+                                                </button>
+                                              ) : canRetryStripeConnect ? (
+                                                <button
+                                                  onClick={() => handleSendStripeConnectPayouts(batch.id, [item.id])}
+                                                  disabled={Boolean(stripeProcessId)}
+                                                  className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/30 rounded hover:bg-nano-yellow/20 transition-colors disabled:opacity-40"
+                                                >
+                                                  {isStripeItemProcessing ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                                                  Retry Stripe Connect Payout
+                                                </button>
+                                              ) : item.stripe_transfer_id ? (
+                                                <span className="text-[10px] text-nano-yellow font-mono">
+                                                  Transferred to Stripe account
+                                                </span>
+                                              ) : item.status === 'pending' && isStripeConnect ? (
+                                                <span className="text-[10px] text-orange-300 font-mono">Stripe setup incomplete</span>
+                                              ) : item.status === 'failed' && isStripeConnect ? (
+                                                <span className="text-[10px] text-red-400 font-mono">Failed</span>
+                                              ) : item.status === 'paid' ? (
+                                                <span className="text-[10px] text-green-400 font-mono">{item.payment_reference || 'Paid'}</span>
+                                              ) : (
+                                                <span className="text-[10px] text-nano-text italic">{item.status}</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                          <tr className="border-t border-nano-border/20 bg-black/20">
+                                            <td colSpan={9} className="px-4 pb-3">
+                                              <div className="rounded border border-nano-border bg-black/30 p-3">
+                                                <div className="mb-2 text-[10px] uppercase tracking-widest text-nano-text">Payout Diagnostics</div>
+                                                <div className="grid grid-cols-2 gap-2 text-[10px] md:grid-cols-4 xl:grid-cols-6">
+                                                  {[
+                                                    ['Batch status', batch.status],
+                                                    ['Item status', item.status],
+                                                    ['Payout method', affiliate?.payout_method || 'manual'],
+                                                    ['Connect account', truncateId(affiliate?.stripe_connect_account_id)],
+                                                    ['Payouts enabled', affiliate?.stripe_connect_payouts_enabled ? 'yes' : 'no'],
+                                                    ['Charges enabled', affiliate?.stripe_connect_charges_enabled ? 'yes' : 'no'],
+                                                    ['Requirements due', summarizeRequirementsDue(affiliate?.stripe_connect_requirements_due)],
+                                                    ['Amount cents', item.amount_cents ?? 0],
+                                                    ['Transfer ID', truncateId(item.stripe_transfer_id)],
+                                                    ['Transfer status', item.stripe_transfer_status || '-'],
+                                                    ['Failure code', item.payout_failure_code || '-'],
+                                                    ['Failure message', formatPayoutFailure(item) || '-'],
+                                                  ].map(([label, value]) => (
+                                                    <div key={label as string} className="min-w-0 rounded bg-white/[0.03] p-2">
+                                                      <div className="text-gray-500">{label as string}</div>
+                                                      <div className="mt-1 truncate font-mono text-nano-text" title={String(value)}>{String(value)}</div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                                <p className="mt-3 text-[10px] text-orange-300">
+                                                  Stripe Connect transfers require available platform balance. Pending/incoming Stripe funds cannot be transferred until they become available.
+                                                </p>
                                               </div>
-                                            )}
-                                          </td>
-                                          <td className="px-4 py-3 text-xs text-nano-text font-mono">
-                                            {item.payment_destination || item.stripe_destination_account_id || item.paypal_email || <span className="text-red-400 italic">Missing</span>}
-                                          </td>
-                                          <td className="px-4 py-3 text-xs text-nano-text">
-                                            <div>{item.payment_provider || (affiliate?.payout_method === 'stripe_connect' ? 'stripe_connect' : 'manual')}</div>
-                                            <div className="text-[10px] text-gray-500">{item.payment_method || '-'}</div>
-                                            {item.stripe_transfer_status && (
-                                              <div className="text-[10px] text-nano-yellow">Transfer: {item.stripe_transfer_status}</div>
-                                            )}
-                                            {item.stripe_payout_status && (
-                                              <div className="text-[10px] text-green-400">Bank payout status: {item.stripe_payout_status}</div>
-                                            )}
-                                          </td>
-                                          <td className="px-4 py-3 text-xs text-white font-mono max-w-[160px] truncate" title={item.payment_reference || item.stripe_transfer_id || item.stripe_payout_id || ''}>
-                                            {item.payment_reference || item.stripe_payout_id || item.stripe_transfer_id || '-'}
-                                          </td>
-                                          <td className="px-4 py-3 text-[11px] text-nano-text font-mono">
-                                            {item.paid_at ? new Date(item.paid_at).toLocaleString() : '-'}
-                                          </td>
-                                          <td className="px-4 py-3 text-[10px] text-nano-text font-mono max-w-[100px] truncate" title={item.paid_by || ''}>
-                                            {item.paid_by ? item.paid_by.slice(0, 8) : '-'}
-                                          </td>
-                                          <td className="px-4 py-3 text-right">
-                                            {canRecordPayment ? (
-                                              <button
-                                                onClick={() => openManualPaymentModal(batch, item)}
-                                                className="px-2 py-1 text-[10px] font-bold uppercase text-green-400 bg-green-400/10 border border-green-400/30 rounded hover:bg-green-400/20 transition-colors"
-                                              >
-                                                Record Manual Payment
-                                              </button>
-                                            ) : canSendStripeConnect ? (
-                                              <button
-                                                onClick={() => handleSendStripeConnectPayouts(batch.id, [item.id])}
-                                                disabled={Boolean(stripeProcessId)}
-                                                className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase text-nano-yellow bg-nano-yellow/10 border border-nano-yellow/30 rounded hover:bg-nano-yellow/20 transition-colors disabled:opacity-40"
-                                              >
-                                                {isStripeItemProcessing ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-                                                Send via Stripe Connect
-                                              </button>
-                                            ) : item.stripe_transfer_id ? (
-                                              <span className="text-[10px] text-nano-yellow font-mono">
-                                                Transferred to Stripe account
-                                              </span>
-                                            ) : item.status === 'pending' && isStripeConnect ? (
-                                              <span className="text-[10px] text-orange-300 font-mono">Stripe setup incomplete</span>
-                                            ) : item.status === 'failed' && isStripeConnect ? (
-                                              <span className="text-[10px] text-red-400 font-mono">Failed</span>
-                                            ) : item.status === 'paid' ? (
-                                              <span className="text-[10px] text-green-400 font-mono">{item.payment_reference || 'Paid'}</span>
-                                            ) : (
-                                              <span className="text-[10px] text-nano-text italic">{item.status}</span>
-                                            )}
-                                          </td>
-                                        </tr>
+                                            </td>
+                                          </tr>
+                                        </React.Fragment>
                                       );
                                     })}
                                   </tbody>
