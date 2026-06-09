@@ -45,6 +45,43 @@ const getPublicSiteBaseUrl = () => {
 };
 
 const buildTrackingUrl = (code: string) => `${getPublicSiteBaseUrl()}/a/${code}`;
+const slugifyFileName = (name: string) => {
+  const dotIndex = name.lastIndexOf('.');
+  const base = dotIndex > -1 ? name.slice(0, dotIndex) : name;
+  const ext = dotIndex > -1 ? name.slice(dotIndex).toLowerCase() : '';
+  const slug = base
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'asset';
+  return `${slug}${ext}`;
+};
+
+const downloadAsset = async (asset: any) => {
+  const url = getAffiliateAssetUrl(asset);
+  if (!url) return;
+
+  const fileName = asset.file_name || `${slugifyFileName(asset.title || 'affiliate-asset')}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Download failed');
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+};
+
 const emptyApplicationForm = {
   full_name: '',
   website_url: '',
@@ -94,6 +131,72 @@ const resetConnectFields = (prev: any) => ({
   stripe_connect_requirements_due: [],
 });
 
+const getPayoutSetupStatus = (affiliate: any): string => {
+  if (!affiliate) return 'Setup incomplete';
+  const requirementsDue = getRequirementsDue(affiliate.stripe_connect_requirements_due);
+  if (!affiliate.stripe_connect_account_id) return 'Setup incomplete';
+  if (!affiliate.stripe_connect_payouts_enabled) return 'Setup incomplete';
+  if (requirementsDue.length > 0) return 'Setup incomplete';
+  return 'Stripe Connect ready';
+};
+
+const shouldDefaultOpenPayoutSetup = (affiliate: any): boolean => {
+  if (!affiliate) return false;
+  const requirementsDue = getRequirementsDue(affiliate.stripe_connect_requirements_due);
+  if (!affiliate.stripe_connect_account_id) return true;
+  if (!affiliate.stripe_connect_payouts_enabled) return true;
+  if (requirementsDue.length > 0) return true;
+  return false;
+};
+
+interface AffiliateDashboardSectionProps {
+  title: string;
+  subtitle?: string;
+  defaultOpen?: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  scrollable?: boolean;
+  maxHeight?: string;
+  emptyState?: React.ReactNode;
+  isEmpty?: boolean;
+}
+
+const AffiliateDashboardSection: React.FC<AffiliateDashboardSectionProps> = ({
+  title,
+  subtitle,
+  isOpen,
+  onToggle,
+  children,
+  scrollable = false,
+  maxHeight = 'max-h-[420px]',
+  emptyState,
+  isEmpty = false,
+}) => (
+  <section className={panelClass}>
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={isOpen}
+      className="flex w-full items-center justify-between gap-3 text-left"
+    >
+      <div>
+        <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow">{title}</h3>
+        {subtitle && <p className="mt-1 text-xs text-nano-text">{subtitle}</p>}
+      </div>
+      <ChevronDown
+        size={18}
+        className={`shrink-0 text-nano-yellow transition-transform ${isOpen ? 'rotate-180' : ''}`}
+      />
+    </button>
+    {isOpen && (
+      <div className={scrollable && !isEmpty ? `mt-4 ${maxHeight} overflow-y-auto pr-2` : 'mt-4'}>
+        {isEmpty && emptyState ? emptyState : children}
+      </div>
+    )}
+  </section>
+);
+
 const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -112,12 +215,65 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<{ title: string; url: string } | null>(null);
-  const [assetsExpanded, setAssetsExpanded] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [connectActionLoading, setConnectActionLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectMessage, setConnectMessage] = useState<string | null>(null);
+
+  // Section expansion state with localStorage persistence
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const saved = localStorage.getItem('cds_affiliate_dashboard_sections');
+      return saved ? JSON.parse(saved) : {
+        overview: true,
+        links: true,
+        referrals: false,
+        commissions: false,
+        payouts: false,
+        assets: false,
+        payoutSetup: false,
+        programTerms: false,
+      };
+    } catch {
+      return {
+        overview: true,
+        links: true,
+        referrals: false,
+        commissions: false,
+        payouts: false,
+        assets: false,
+        payoutSetup: false,
+        programTerms: false,
+      };
+    }
+  });
+
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => {
+      const next = { ...prev, [section]: !prev[section] };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('cds_affiliate_dashboard_sections', JSON.stringify(next));
+        } catch {
+          // localStorage not available, silently fail
+        }
+      }
+      return next;
+    });
+  };
+
+  // Initialize defaultOpen for Links and Payout Setup based on data
+  const linksDefaultOpen = useMemo(() => {
+    if (expandedSections.links !== undefined) return expandedSections.links;
+    return links.length <= 3;
+  }, [links.length, expandedSections.links]);
+
+  const payoutSetupDefaultOpen = useMemo(() => {
+    if (expandedSections.payoutSetup !== undefined) return expandedSections.payoutSetup;
+    return shouldDefaultOpenPayoutSetup(affiliate);
+  }, [affiliate, expandedSections.payoutSetup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -598,49 +754,56 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
             </div>
           </section>
 
-          <section className={panelClass}>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Links</h3>
-            {links.length === 0 ? (
-              <p className="text-sm text-nano-text italic">No affiliate links are assigned yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {links.map(link => {
-                  const fullUrl = buildTrackingUrl(link.code);
-                  return (
-                    <div key={link.id} className="rounded-sm border border-nano-border bg-black/40 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-white font-mono text-sm truncate">
-                            <LinkIcon size={14} className="text-nano-yellow shrink-0" />
-                            <span className="truncate">{fullUrl}</span>
-                          </div>
-                          <div className="mt-2 text-xs text-nano-text">
-                            Campaign: {link.campaign || 'default'} · Destination: {link.destination_url || '/'}
-                          </div>
+          <AffiliateDashboardSection
+            title="Links"
+            subtitle={links.length > 0 ? `${links.length} link${links.length === 1 ? '' : 's'}` : undefined}
+            isOpen={expandedSections.links}
+            onToggle={() => toggleSection('links')}
+            isEmpty={links.length === 0}
+            emptyState={<p className="text-sm text-nano-text italic">No affiliate links are assigned yet.</p>}
+          >
+            <div className="space-y-3">
+              {links.map(link => {
+                const fullUrl = buildTrackingUrl(link.code);
+                return (
+                  <div key={link.id} className="rounded-sm border border-nano-border bg-black/40 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-white font-mono text-sm truncate">
+                          <LinkIcon size={14} className="text-nano-yellow shrink-0" />
+                          <span className="truncate">{fullUrl}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => copyLink(link)}
-                          className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 text-nano-yellow text-xs font-bold uppercase tracking-wider hover:bg-nano-yellow/20 transition-colors"
-                        >
-                          {copiedLinkId === link.id ? <CheckCircle size={14} /> : <Copy size={14} />}
-                          {copiedLinkId === link.id ? 'Copied' : 'Copy'}
-                        </button>
+                        <div className="mt-2 text-xs text-nano-text">
+                          Campaign: {link.campaign || 'default'} · Destination: {link.destination_url || '/'}
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => copyLink(link)}
+                        className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 text-nano-yellow text-xs font-bold uppercase tracking-wider hover:bg-nano-yellow/20 transition-colors"
+                      >
+                        {copiedLinkId === link.id ? <CheckCircle size={14} /> : <Copy size={14} />}
+                        {copiedLinkId === link.id ? 'Copied' : 'Copy'}
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                  </div>
+                );
+              })}
+            </div>
+          </AffiliateDashboardSection>
 
-          <section className={panelClass}>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Referrals</h3>
-            {referrals.length === 0 ? (
-              <p className="text-sm text-nano-text italic">No referrals yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+          <AffiliateDashboardSection
+            title="Referrals"
+            subtitle={referrals.length > 0 ? `${referrals.length} referral${referrals.length === 1 ? '' : 's'}` : undefined}
+            isOpen={expandedSections.referrals}
+            onToggle={() => toggleSection('referrals')}
+            scrollable={referrals.length > 0}
+            maxHeight="max-h-[420px]"
+            isEmpty={referrals.length === 0}
+            emptyState={<p className="text-sm text-nano-text italic">No referrals yet.</p>}
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
                   <thead className="text-[10px] uppercase tracking-widest text-nano-text">
                     <tr>
                       <th className="p-3">Status</th>
@@ -659,31 +822,35 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                   </tbody>
                 </table>
               </div>
-            )}
-          </section>
+            </AffiliateDashboardSection>
 
-          <section className={panelClass}>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Commissions</h3>
-            {commissions.length === 0 ? (
-              <p className="text-sm text-nano-text italic">No commission ledger entries yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="text-[10px] uppercase tracking-widest text-nano-text">
-                    <tr>
-                      <th className="p-3">Type</th>
-                      <th className="p-3 text-right">Amount</th>
-                      <th className="p-3">Hold Status</th>
-                      <th className="p-3">Hold Until</th>
-                      <th className="p-3">Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {commissions.map(row => {
-                      const inHold = row.hold_until && new Date(row.hold_until) > new Date();
-                      return (
-                        <tr key={row.id} className="border-t border-nano-border/60">
-                          <td className={row.type === 'reversal' ? 'p-3 text-sm text-red-400' : 'p-3 text-sm text-green-400'}>{row.type}</td>
+          <AffiliateDashboardSection
+            title="Commissions"
+            subtitle={commissions.length > 0 ? `${commissions.length} entry${commissions.length === 1 ? '' : 'ies'}` : undefined}
+            isOpen={expandedSections.commissions}
+            onToggle={() => toggleSection('commissions')}
+            scrollable={commissions.length > 0}
+            maxHeight="max-h-[460px]"
+            isEmpty={commissions.length === 0}
+            emptyState={<p className="text-sm text-nano-text italic">No commission ledger entries yet.</p>}
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="text-[10px] uppercase tracking-widest text-nano-text">
+                  <tr>
+                    <th className="p-3">Type</th>
+                    <th className="p-3 text-right">Amount</th>
+                    <th className="p-3">Hold Status</th>
+                    <th className="p-3">Hold Until</th>
+                    <th className="p-3">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {commissions.map(row => {
+                    const inHold = row.hold_until && new Date(row.hold_until) > new Date();
+                    return (
+                      <tr key={row.id} className="border-t border-nano-border/60">
+                        <td className={row.type === 'reversal' ? 'p-3 text-sm text-red-400' : 'p-3 text-sm text-green-400'}>{row.type}</td>
                           <td className="p-3 text-sm text-white font-mono text-right">{money(row.amount_cents)}</td>
                           <td className="p-3 text-sm text-nano-text">{inHold ? 'In hold' : 'Released'}</td>
                           <td className="p-3 text-sm text-nano-text font-mono">{date(row.hold_until)}</td>
@@ -691,25 +858,29 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+                </tbody>
+              </table>
+            </div>
+          </AffiliateDashboardSection>
 
-          <section className={panelClass}>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Payouts</h3>
-            {payouts.length === 0 ? (
-              <p className="text-sm text-nano-text italic">No payout records yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="text-[10px] uppercase tracking-widest text-nano-text">
-                    <tr>
-                      <th className="p-3">Status</th>
-                      <th className="p-3 text-right">Amount</th>
-                      <th className="p-3">Method</th>
-                      <th className="p-3">Transfer Status</th>
+          <AffiliateDashboardSection
+            title="Payouts"
+            subtitle={payouts.length > 0 ? `${payouts.length} payout${payouts.length === 1 ? '' : 's'}` : undefined}
+            isOpen={expandedSections.payouts}
+            onToggle={() => toggleSection('payouts')}
+            scrollable={payouts.length > 0}
+            maxHeight="max-h-[420px]"
+            isEmpty={payouts.length === 0}
+            emptyState={<p className="text-sm text-nano-text italic">No payout records yet.</p>}
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="text-[10px] uppercase tracking-widest text-nano-text">
+                  <tr>
+                    <th className="p-3">Status</th>
+                    <th className="p-3 text-right">Amount</th>
+                    <th className="p-3">Method</th>
+                    <th className="p-3">Transfer Status</th>
                       <th className="p-3">Bank Payout Status</th>
                       <th className="p-3">Reference</th>
                       <th className="p-3">Paid At</th>
@@ -733,37 +904,22 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+                </tbody>
+              </table>
+            </div>
+          </AffiliateDashboardSection>
 
-          <section className={panelClass}>
-            <button
-              type="button"
-              onClick={() => assets.length > 0 && setAssetsExpanded(open => !open)}
-              aria-expanded={assets.length > 0 ? assetsExpanded : undefined}
-              className="flex w-full items-center justify-between gap-3 text-left"
-            >
-              <div>
-                <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow">Marketing Assets</h3>
-                <p className="mt-1 text-xs text-nano-text">
-                  {assets.length > 0 ? `${assets.length} asset${assets.length === 1 ? '' : 's'} available` : 'No marketing assets are available yet.'}
-                </p>
-              </div>
-              {assets.length > 0 && (
-                <ChevronDown
-                  size={18}
-                  className={`shrink-0 text-nano-yellow transition-transform ${assetsExpanded ? 'rotate-180' : ''}`}
-                />
-              )}
-            </button>
-            {assets.length === 0 ? (
-              <p className="mt-3 text-sm text-nano-text italic">Check back later for banners, links, and swipe copy.</p>
-            ) : assetsExpanded ? (
-              <div className="mt-4 max-h-[720px] overflow-y-auto pr-2">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <AffiliateDashboardSection
+            title="Marketing Assets"
+            subtitle={assets.length > 0 ? `${assets.length} asset${assets.length === 1 ? '' : 's'} available` : undefined}
+            isOpen={expandedSections.assets}
+            onToggle={() => toggleSection('assets')}
+            scrollable={assets.length > 0}
+            maxHeight="max-h-[720px]"
+            isEmpty={assets.length === 0}
+            emptyState={<p className="text-sm text-nano-text italic">Check back later for banners, links, and swipe copy.</p>}
+          >
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {assets.map(asset => {
                   const assetUrl = getAffiliateAssetUrl(asset);
                   const previewUrl = asset.thumbnail_url || assetUrl;
@@ -800,14 +956,15 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                         <div className="mt-auto flex flex-wrap gap-2 pt-4">
                           {assetUrl && (
                             <>
-                              <a
-                                href={assetUrl}
-                                target="_blank"
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => downloadAsset(asset)}
                                 className="inline-flex items-center justify-center rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
+                                title="Download asset"
                               >
-                                Open Asset
-                              </a>
+                                <Download size={13} />
+                                Download
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => copyAssetValue(asset, 'url')}
@@ -843,15 +1000,15 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                     </div>
                   );
                 })}
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-nano-text">Expand to view and copy banners, files, and promotional text.</p>
-            )}
-          </section>
+            </div>
+          </AffiliateDashboardSection>
 
-          <section className={panelClass}>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Payout Setup</h3>
+          <AffiliateDashboardSection
+            title="Payout Setup"
+            subtitle={getPayoutSetupStatus(affiliate)}
+            isOpen={expandedSections.payoutSetup}
+            onToggle={() => toggleSection('payoutSetup')}
+          >
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4">
               <div className="rounded-sm border border-nano-border bg-black/40 p-4">
                 <div className="flex items-start gap-3">
@@ -939,10 +1096,14 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                 </div>
               </div>
             </div>
-          </section>
+          </AffiliateDashboardSection>
 
-          <section className={panelClass}>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Program Terms</h3>
+          <AffiliateDashboardSection
+            title="Program Terms"
+            subtitle="Commission and payout rules"
+            isOpen={expandedSections.programTerms}
+            onToggle={() => toggleSection('programTerms')}
+          >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-sm border border-nano-border bg-black/40 p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
@@ -969,7 +1130,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                 </p>
               </div>
             </div>
-          </section>
+          </AffiliateDashboardSection>
         </div>
       </div>
       {previewAsset && (
@@ -977,9 +1138,22 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
           <div className="w-full max-w-6xl rounded-lg border border-nano-border bg-nano-panel shadow-2xl">
             <div className="flex items-center justify-between border-b border-nano-border px-5 py-4">
               <span className="truncate text-sm font-bold uppercase tracking-widest text-white">{previewAsset.title}</span>
-              <button onClick={() => setPreviewAsset(null)} className="text-nano-text hover:text-white" title="Close preview">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const asset = assets.find(a => (a.thumbnail_url === previewAsset.url || getAffiliateAssetUrl(a) === previewAsset.url));
+                    if (asset) downloadAsset(asset);
+                  }}
+                  className="text-nano-text hover:text-white transition-colors"
+                  title="Download asset"
+                >
+                  <Download size={16} />
+                </button>
+                <button onClick={() => setPreviewAsset(null)} className="text-nano-text hover:text-white" title="Close preview">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <div className="flex max-h-[80vh] items-center justify-center overflow-hidden bg-black/60 p-4">
               <img src={previewAsset.url} alt="" className="max-h-[78vh] max-w-[90vw] object-contain" />
