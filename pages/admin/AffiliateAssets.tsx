@@ -9,6 +9,7 @@ import {
   Link as LinkIcon,
   List,
   Loader2,
+  Maximize2,
   Plus,
   RefreshCw,
   Trash2,
@@ -78,6 +79,7 @@ const AffiliateAssetsAdmin: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [previewAsset, setPreviewAsset] = useState<{ title: string; url: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -387,6 +389,16 @@ const AffiliateAssetsAdmin: React.FC = () => {
             <FileText size={14} />
           </button>
         )}
+        {url && (isImageMime(asset.mime_type) || asset.type === 'logo') && (
+          <button
+            type="button"
+            onClick={() => setPreviewAsset({ title: asset.title || 'Asset preview', url })}
+            className="rounded border border-nano-border bg-white/5 p-1.5 text-nano-text hover:text-white"
+            title="View full preview"
+          >
+            <Maximize2 size={14} />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => openEdit(asset)}
@@ -461,8 +473,8 @@ const AffiliateAssetsAdmin: React.FC = () => {
       )}
 
       {loading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 animate-pulse">
-          {[...Array(6)].map((_, i) => <div key={i} className="h-56 rounded bg-white/5" />)}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,420px))] justify-start gap-4 animate-pulse">
+          {[...Array(6)].map((_, i) => <div key={i} className="h-80 rounded bg-white/5" />)}
         </div>
       ) : assets.length === 0 ? (
         <div className="rounded-lg border border-nano-border bg-black p-12 text-center">
@@ -470,13 +482,21 @@ const AffiliateAssetsAdmin: React.FC = () => {
           <p className="text-sm italic text-gray-500">No affiliate assets yet.</p>
         </div>
       ) : viewMode === 'cards' ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,420px))] justify-start gap-4">
           {assets.map(asset => (
-            <div key={asset.id} className="rounded-lg border border-nano-border bg-black/70 overflow-hidden">
-              <div className="flex h-36 items-center justify-center overflow-hidden border-b border-nano-border bg-black/40 p-3">
+            <div key={asset.id} className="flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-nano-border bg-black/70">
+              <button
+                type="button"
+                onClick={() => {
+                  const url = asset.thumbnail_url || getAssetUrl(asset);
+                  if (url && (isImageMime(asset.mime_type) || asset.type === 'logo')) setPreviewAsset({ title: asset.title || 'Asset preview', url });
+                }}
+                className="flex h-64 w-full items-center justify-center overflow-hidden border-b border-nano-border bg-black/50 p-3"
+                title="View full preview"
+              >
                 {renderPreview(asset)}
-              </div>
-              <div className="p-4">
+              </button>
+              <div className="flex flex-1 flex-col p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-bold text-white">{asset.title}</div>
@@ -491,7 +511,7 @@ const AffiliateAssetsAdmin: React.FC = () => {
                 <div className="mt-3 text-[11px] font-mono text-nano-text">
                   {asset.file_name || 'Copy/text asset'} {asset.file_size_bytes ? `- ${formatBytes(asset.file_size_bytes)}` : ''}
                 </div>
-                <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="mt-auto flex items-center justify-between gap-3 pt-4">
                   {renderAssetActions(asset)}
                   {copied?.startsWith(asset.id) && <span className="text-[10px] text-green-400">Copied</span>}
                 </div>
@@ -562,7 +582,7 @@ const AffiliateAssetsAdmin: React.FC = () => {
                   className={`flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed p-5 text-center ${isDragging ? 'border-nano-yellow bg-nano-yellow/10' : 'border-nano-border bg-black/50'}`}
                 >
                   {previewUrl && selectedFile && isImageMime(selectedFile.type) ? (
-                    <div className="flex h-52 w-full items-center justify-center overflow-hidden rounded border border-nano-border bg-black/40 p-3">
+                    <div className="flex h-80 w-full items-center justify-center overflow-hidden rounded border border-nano-border bg-black/40 p-3">
                       <img src={previewUrl} alt="" className="max-h-full max-w-full object-contain" />
                     </div>
                   ) : previewUrl && selectedFile ? (
@@ -572,7 +592,7 @@ const AffiliateAssetsAdmin: React.FC = () => {
                       <div className="mt-1 text-xs text-nano-text">{selectedFile.type || 'Unknown type'} - {formatBytes(selectedFile.size)}</div>
                     </div>
                   ) : editingAsset && getAssetUrl(editingAsset) && isImageMime(editingAsset.mime_type) ? (
-                    <div className="flex h-52 w-full items-center justify-center overflow-hidden rounded border border-nano-border bg-black/40 p-3">
+                    <div className="flex h-80 w-full items-center justify-center overflow-hidden rounded border border-nano-border bg-black/40 p-3">
                       <img src={editingAsset.thumbnail_url || getAssetUrl(editingAsset)} alt="" className="max-h-full max-w-full object-contain" />
                     </div>
                   ) : (
@@ -714,6 +734,22 @@ const AffiliateAssetsAdmin: React.FC = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewAsset && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 p-4">
+          <div className="w-full max-w-6xl rounded-lg border border-nano-border bg-nano-panel shadow-2xl">
+            <div className="flex items-center justify-between border-b border-nano-border px-5 py-4">
+              <span className="truncate text-sm font-bold uppercase tracking-widest text-white">{previewAsset.title}</span>
+              <button onClick={() => setPreviewAsset(null)} className="text-nano-text hover:text-white" title="Close preview">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex max-h-[80vh] items-center justify-center overflow-hidden bg-black/60 p-4">
+              <img src={previewAsset.url} alt="" className="max-h-[78vh] max-w-[90vw] object-contain" />
             </div>
           </div>
         </div>

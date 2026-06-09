@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { Banknote, CheckCircle, Copy, CreditCard, Download, FileText, Link as LinkIcon, Loader2, RefreshCw, ShieldAlert, UserCheck } from 'lucide-react';
+import { Banknote, CheckCircle, Copy, CreditCard, Download, FileText, Link as LinkIcon, Loader2, Maximize2, RefreshCw, ShieldAlert, UserCheck, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 interface AffiliateDashboardProps {
@@ -95,6 +95,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [assets, setAssets] = useState<any[]>([]);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<{ title: string; url: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [connectActionLoading, setConnectActionLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -532,27 +533,32 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
             {assets.length === 0 ? (
               <p className="text-sm text-nano-text italic">No marketing assets are available yet.</p>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,420px))] justify-start gap-4">
                 {assets.map(asset => {
                   const assetUrl = getAffiliateAssetUrl(asset);
                   const previewUrl = asset.thumbnail_url || assetUrl;
                   const copyText = asset.copy_body || asset.description || '';
                   return (
-                    <div key={asset.id} className="overflow-hidden rounded-sm border border-nano-border bg-black/40">
+                    <div key={asset.id} className="flex min-h-[430px] flex-col overflow-hidden rounded-sm border border-nano-border bg-black/40">
                       {assetUrl && isImageAsset(asset) ? (
-                        <div className="flex h-40 items-center justify-center overflow-hidden border-b border-nano-border bg-black/40 p-3">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAsset({ title: asset.title || 'Asset preview', url: previewUrl })}
+                          className="flex h-64 w-full items-center justify-center overflow-hidden border-b border-nano-border bg-black/50 p-3"
+                          title="View full preview"
+                        >
                           <img
                             src={previewUrl}
                             alt=""
                             className="max-h-full max-w-full object-contain"
                           />
-                        </div>
+                        </button>
                       ) : (
                         <div className="flex h-24 items-center justify-center border-b border-nano-border bg-white/[0.03]">
                           {assetUrl ? <Download size={24} className="text-nano-yellow" /> : <FileText size={24} className="text-nano-yellow" />}
                         </div>
                       )}
-                      <div className="p-4">
+                      <div className="flex flex-1 flex-col p-4">
                         <div className="text-white font-bold">{asset.title}</div>
                         <div className="mt-1 text-xs text-nano-text uppercase tracking-wider">{asset.type.replace('_', ' ')}</div>
                         {asset.description && <p className="text-sm text-nano-text mt-2">{asset.description}</p>}
@@ -561,7 +567,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                             <p className="line-clamp-4 whitespace-pre-wrap text-sm text-nano-text">{asset.copy_body}</p>
                           </div>
                         )}
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="mt-auto flex flex-wrap gap-2 pt-4">
                           {assetUrl && (
                             <>
                               <a
@@ -580,6 +586,16 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                                 <Copy size={13} />
                                 {copiedAssetId === `${asset.id}:url` ? 'Copied' : 'Copy Link'}
                               </button>
+                              {isImageAsset(asset) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewAsset({ title: asset.title || 'Asset preview', url: previewUrl })}
+                                  className="inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
+                                >
+                                  <Maximize2 size={13} />
+                                  View
+                                </button>
+                              )}
                             </>
                           )}
                           {copyText && (
@@ -723,6 +739,21 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
           </section>
         </div>
       </div>
+      {previewAsset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
+          <div className="w-full max-w-6xl rounded-lg border border-nano-border bg-nano-panel shadow-2xl">
+            <div className="flex items-center justify-between border-b border-nano-border px-5 py-4">
+              <span className="truncate text-sm font-bold uppercase tracking-widest text-white">{previewAsset.title}</span>
+              <button onClick={() => setPreviewAsset(null)} className="text-nano-text hover:text-white" title="Close preview">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex max-h-[80vh] items-center justify-center overflow-hidden bg-black/60 p-4">
+              <img src={previewAsset.url} alt="" className="max-h-[78vh] max-w-[90vw] object-contain" />
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };
