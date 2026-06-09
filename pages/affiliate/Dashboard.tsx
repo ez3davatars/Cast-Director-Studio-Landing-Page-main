@@ -45,6 +45,17 @@ const getPublicSiteBaseUrl = () => {
 };
 
 const buildTrackingUrl = (code: string) => `${getPublicSiteBaseUrl()}/a/${code}`;
+const emptyApplicationForm = {
+  full_name: '',
+  website_url: '',
+  social_url: '',
+  audience_description: '',
+  promotion_plan: '',
+  estimated_audience_size: '',
+  primary_country: '',
+  agreed_to_terms: false,
+  agreed_to_disclosure_rules: false,
+};
 
 const getRequirementsDue = (value: any): string[] => {
   if (!value) return [];
@@ -93,6 +104,11 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [commissions, setCommissions] = useState<any[]>([]);
   const [payouts, setPayouts] = useState<any[]>([]);
   const [assets, setAssets] = useState<any[]>([]);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [applicationForm, setApplicationForm] = useState(emptyApplicationForm);
+  const [applicationSubmitting, setApplicationSubmitting] = useState(false);
+  const [applicationError, setApplicationError] = useState<string | null>(null);
+  const [applicationSuccess, setApplicationSuccess] = useState<string | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<{ title: string; url: string } | null>(null);
@@ -137,7 +153,16 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
         if (cancelled) return;
 
         setAffiliate(affiliateRow || null);
-        if (!affiliateRow) return;
+        if (!affiliateRow) {
+          const { data: appRows, error: appErr } = await supabase
+            .from('affiliate_applications')
+            .select('id, status, full_name, website_url, social_url, audience_description, promotion_plan, estimated_audience_size, primary_country, agreed_to_terms, agreed_to_disclosure_rules, created_at, updated_at, reviewed_at')
+            .eq('user_id', session.user.id)
+            .order('created_at', { ascending: false });
+          if (appErr) throw appErr;
+          setApplications(appRows || []);
+          return;
+        }
 
         if (affiliateRow.status !== 'active') {
           setStats(null);
@@ -283,6 +308,51 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
     }
   };
 
+  const latestApplication = applications[0] || null;
+  const hasPendingApplication = applications.some(app => app.status === 'pending');
+
+  const submitApplication = async () => {
+    setApplicationError(null);
+    setApplicationSuccess(null);
+    if (hasPendingApplication) {
+      setApplicationError('You already have a pending affiliate application.');
+      return;
+    }
+    if (!applicationForm.agreed_to_terms || !applicationForm.agreed_to_disclosure_rules) {
+      setApplicationError('Please agree to the program terms and disclosure rules.');
+      return;
+    }
+    if (!applicationForm.audience_description.trim() || !applicationForm.promotion_plan.trim()) {
+      setApplicationError('Audience description and promotion plan are required.');
+      return;
+    }
+
+    setApplicationSubmitting(true);
+    try {
+      const { error: insertErr } = await supabase.from('affiliate_applications').insert([{
+        user_id: session.user.id,
+        email: session.user.email || '',
+        full_name: applicationForm.full_name.trim() || null,
+        website_url: applicationForm.website_url.trim() || null,
+        social_url: applicationForm.social_url.trim() || null,
+        audience_description: applicationForm.audience_description.trim(),
+        promotion_plan: applicationForm.promotion_plan.trim(),
+        estimated_audience_size: applicationForm.estimated_audience_size.trim() || null,
+        primary_country: applicationForm.primary_country.trim() || null,
+        agreed_to_terms: applicationForm.agreed_to_terms,
+        agreed_to_disclosure_rules: applicationForm.agreed_to_disclosure_rules,
+      }]);
+      if (insertErr) throw insertErr;
+      setApplicationSuccess('Application submitted. Cast Director Studio will review it manually.');
+      setApplicationForm(emptyApplicationForm);
+      setRefreshKey(k => k + 1);
+    } catch (err: any) {
+      setApplicationError(err.message || 'Unable to submit affiliate application.');
+    } finally {
+      setApplicationSubmitting(false);
+    }
+  };
+
   const handleSyncConnectStatus = async () => {
     setSyncLoading(true);
     setConnectError(null);
@@ -335,13 +405,153 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   }
 
   if (!affiliate) {
+    const rejectedApplication = latestApplication?.status === 'rejected' ? latestApplication : null;
     return (
       <section className="py-20 border-t border-nano-border bg-black/20 min-h-[60vh]">
-        <div className="container mx-auto px-6 max-w-4xl">
-          <div className={panelClass}>
-            <UserCheck className="text-nano-yellow mb-4" size={28} />
-            <h2 className="text-3xl font-bold mb-2">Affiliate Program</h2>
-            <p className="text-nano-text">You do not have an affiliate account yet. Affiliate access is invite-only and managed by Cast Director Studio.</p>
+        <div className="container mx-auto px-6 max-w-6xl">
+          <div className="mb-8">
+            <h2 className="text-3xl md:text-4xl font-bold mb-2">Affiliate Program</h2>
+            <p className="text-nano-text max-w-3xl">
+              Share Cast Director Studio with your audience and apply to earn commissions on eligible referred customers. Applications are reviewed manually.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[0.9fr_1.1fr] gap-6">
+            <div className="space-y-6">
+              <section className={panelClass}>
+                <UserCheck className="text-nano-yellow mb-4" size={28} />
+                <h3 className="text-xl font-bold mb-3">Program Overview</h3>
+                <p className="text-sm text-nano-text">
+                  Approved affiliates receive tracking links, marketing assets, dashboard reporting, and payout setup options. We look for partners who can promote clearly, honestly, and with relevant creative or production audiences.
+                </p>
+              </section>
+
+              <section className={panelClass}>
+                <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Program Terms</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    ['Default commission rate', '30%'],
+                    ['Commission duration', '12 months'],
+                    ['Attribution window', '60 days'],
+                    ['Payout hold', '30 days'],
+                    ['Minimum payout', '$50'],
+                    ['Payout methods', 'Manual or Stripe direct deposit'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-sm border border-nano-border bg-black/40 p-3">
+                      <div className="text-[10px] uppercase tracking-widest text-nano-text">{label}</div>
+                      <div className="mt-1 text-sm font-mono text-white">{value}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 space-y-2 text-sm text-nano-text">
+                  <p>Refunds, disputes, chargebacks, and reversals may reduce payable commissions.</p>
+                  <p>Affiliates must not make false claims or imply guaranteed results.</p>
+                  <p>Affiliates must clearly disclose affiliate relationships in promotions.</p>
+                </div>
+              </section>
+
+              {latestApplication && (
+                <section className={panelClass}>
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-3">Application Status</h3>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className={`rounded-sm border px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                      latestApplication.status === 'pending'
+                        ? 'border-nano-yellow/30 bg-nano-yellow/10 text-nano-yellow'
+                        : latestApplication.status === 'rejected'
+                          ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                          : 'border-nano-border bg-white/5 text-nano-text'
+                    }`}>
+                      {latestApplication.status}
+                    </span>
+                    <span className="text-xs font-mono text-nano-text">Submitted {date(latestApplication.created_at)}</span>
+                  </div>
+                  {latestApplication.status === 'pending' && (
+                    <p className="mt-3 text-sm text-nano-text">Your application is in review. You do not need to submit another one.</p>
+                  )}
+                  {rejectedApplication && (
+                    <p className="mt-3 text-sm text-nano-text">Your previous application was not approved. You may submit a new application if your audience or promotion plan has changed.</p>
+                  )}
+                </section>
+              )}
+            </div>
+
+            <section className={panelClass}>
+              <h3 className="text-xl font-bold mb-2">Apply to Join</h3>
+              <p className="mb-5 text-sm text-nano-text">Tell us where you promote and how you plan to introduce Cast Director Studio. Applications are reviewed manually.</p>
+
+              {applicationSuccess && <div className="mb-4 rounded border border-green-400/30 bg-green-400/10 p-3 text-sm text-green-300">{applicationSuccess}</div>}
+              {applicationError && <div className="mb-4 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">{applicationError}</div>}
+
+              {hasPendingApplication ? (
+                <div className="rounded-sm border border-nano-border bg-black/40 p-5 text-sm text-nano-text">
+                  Your current application is pending review. Cast Director Studio will update your status after manual review.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {[
+                    ['full_name', 'Full name'],
+                    ['website_url', 'Website URL'],
+                    ['social_url', 'Primary social URL'],
+                    ['estimated_audience_size', 'Estimated audience size'],
+                    ['primary_country', 'Primary country'],
+                  ].map(([key, label]) => (
+                    <div key={key}>
+                      <label className="mb-1 block text-xs uppercase tracking-wider text-gray-500">{label}</label>
+                      <input
+                        value={(applicationForm as any)[key]}
+                        onChange={e => setApplicationForm(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full rounded border border-nano-border bg-black px-3 py-2 text-sm text-white focus:border-nano-yellow focus:outline-none"
+                      />
+                    </div>
+                  ))}
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-wider text-gray-500">Audience Description</label>
+                    <textarea
+                      value={applicationForm.audience_description}
+                      onChange={e => setApplicationForm(prev => ({ ...prev, audience_description: e.target.value }))}
+                      rows={4}
+                      className="w-full resize-none rounded border border-nano-border bg-black px-3 py-2 text-sm text-white focus:border-nano-yellow focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-wider text-gray-500">Promotion Plan</label>
+                    <textarea
+                      value={applicationForm.promotion_plan}
+                      onChange={e => setApplicationForm(prev => ({ ...prev, promotion_plan: e.target.value }))}
+                      rows={4}
+                      className="w-full resize-none rounded border border-nano-border bg-black px-3 py-2 text-sm text-white focus:border-nano-yellow focus:outline-none"
+                    />
+                  </div>
+                  <label className="flex items-start gap-2 text-sm text-nano-text">
+                    <input
+                      type="checkbox"
+                      checked={applicationForm.agreed_to_terms}
+                      onChange={e => setApplicationForm(prev => ({ ...prev, agreed_to_terms: e.target.checked }))}
+                      className="mt-1 accent-yellow-400"
+                    />
+                    I agree to the affiliate program terms.
+                  </label>
+                  <label className="flex items-start gap-2 text-sm text-nano-text">
+                    <input
+                      type="checkbox"
+                      checked={applicationForm.agreed_to_disclosure_rules}
+                      onChange={e => setApplicationForm(prev => ({ ...prev, agreed_to_disclosure_rules: e.target.checked }))}
+                      className="mt-1 accent-yellow-400"
+                    />
+                    I agree to clearly disclose my affiliate relationship when promoting Cast Director Studio.
+                  </label>
+                  <button
+                    type="button"
+                    onClick={submitApplication}
+                    disabled={applicationSubmitting}
+                    className="inline-flex items-center gap-2 rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-4 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20 disabled:opacity-50"
+                  >
+                    {applicationSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
+                    {applicationSubmitting ? 'Submitting...' : 'Submit Application'}
+                  </button>
+                </div>
+              )}
+            </section>
           </div>
         </div>
       </section>

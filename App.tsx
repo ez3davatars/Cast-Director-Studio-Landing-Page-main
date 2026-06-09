@@ -34,6 +34,7 @@ import AffiliatesAdmin from './pages/admin/Affiliates';
 import AffiliateDetailAdmin from './pages/admin/AffiliateDetail';
 import AffiliateProgramAdmin from './pages/admin/AffiliateProgram';
 import AffiliateAssetsAdmin from './pages/admin/AffiliateAssets';
+import AffiliateApplicationsAdmin from './pages/admin/AffiliateApplications';
 import PayoutsAdmin from './pages/admin/Payouts';
 import Success from './pages/Success';
 import GetStarted from './pages/GetStarted';
@@ -255,6 +256,7 @@ function App() {
             <Route path="affiliates" element={<AffiliatesAdmin />} />
             <Route path="affiliates/:id" element={<AffiliateDetailAdmin />} />
             <Route path="affiliate-program" element={<AffiliateProgramAdmin />} />
+            <Route path="affiliate-applications" element={<AffiliateApplicationsAdmin />} />
             <Route path="affiliate-assets" element={<AffiliateAssetsAdmin />} />
             <Route path="payouts" element={<PayoutsAdmin />} />
           </Route>
