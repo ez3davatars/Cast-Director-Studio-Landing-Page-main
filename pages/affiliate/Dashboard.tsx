@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { Banknote, CheckCircle, Copy, CreditCard, Download, FileText, Link as LinkIcon, Loader2, Maximize2, RefreshCw, ShieldAlert, UserCheck, X } from 'lucide-react';
+import { Banknote, CheckCircle, ChevronDown, Copy, CreditCard, Download, FileText, Link as LinkIcon, Loader2, Maximize2, RefreshCw, ShieldAlert, UserCheck, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 interface AffiliateDashboardProps {
@@ -96,6 +96,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<{ title: string; url: string } | null>(null);
+  const [assetsExpanded, setAssetsExpanded] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [connectActionLoading, setConnectActionLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -529,22 +530,41 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
           </section>
 
           <section className={panelClass}>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow mb-4">Marketing Assets</h3>
+            <button
+              type="button"
+              onClick={() => assets.length > 0 && setAssetsExpanded(open => !open)}
+              aria-expanded={assets.length > 0 ? assetsExpanded : undefined}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-widest text-nano-yellow">Marketing Assets</h3>
+                <p className="mt-1 text-xs text-nano-text">
+                  {assets.length > 0 ? `${assets.length} asset${assets.length === 1 ? '' : 's'} available` : 'No marketing assets are available yet.'}
+                </p>
+              </div>
+              {assets.length > 0 && (
+                <ChevronDown
+                  size={18}
+                  className={`shrink-0 text-nano-yellow transition-transform ${assetsExpanded ? 'rotate-180' : ''}`}
+                />
+              )}
+            </button>
             {assets.length === 0 ? (
-              <p className="text-sm text-nano-text italic">No marketing assets are available yet.</p>
-            ) : (
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,420px))] justify-start gap-4">
+              <p className="mt-3 text-sm text-nano-text italic">Check back later for banners, links, and swipe copy.</p>
+            ) : assetsExpanded ? (
+              <div className="mt-4 max-h-[720px] overflow-y-auto pr-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {assets.map(asset => {
                   const assetUrl = getAffiliateAssetUrl(asset);
                   const previewUrl = asset.thumbnail_url || assetUrl;
                   const copyText = asset.copy_body || asset.description || '';
                   return (
-                    <div key={asset.id} className="flex min-h-[430px] flex-col overflow-hidden rounded-sm border border-nano-border bg-black/40">
+                    <div key={asset.id} className="flex min-h-[360px] flex-col overflow-hidden rounded-sm border border-nano-border bg-black/40">
                       {assetUrl && isImageAsset(asset) ? (
                         <button
                           type="button"
                           onClick={() => setPreviewAsset({ title: asset.title || 'Asset preview', url: previewUrl })}
-                          className="flex h-64 w-full items-center justify-center overflow-hidden border-b border-nano-border bg-black/50 p-3"
+                          className="flex h-52 w-full items-center justify-center overflow-hidden border-b border-nano-border bg-black/50 p-3"
                           title="View full preview"
                         >
                           <img
@@ -564,7 +584,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                         {asset.description && <p className="text-sm text-nano-text mt-2">{asset.description}</p>}
                         {asset.copy_body && (
                           <div className="mt-3 rounded-sm border border-nano-border bg-black/50 p-3">
-                            <p className="line-clamp-4 whitespace-pre-wrap text-sm text-nano-text">{asset.copy_body}</p>
+                            <p className="line-clamp-3 whitespace-pre-wrap text-sm text-nano-text">{asset.copy_body}</p>
                           </div>
                         )}
                         <div className="mt-auto flex flex-wrap gap-2 pt-4">
@@ -574,14 +594,14 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                                 href={assetUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center justify-center rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
+                                className="inline-flex items-center justify-center rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
                               >
                                 Open Asset
                               </a>
                               <button
                                 type="button"
                                 onClick={() => copyAssetValue(asset, 'url')}
-                                className="inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
+                                className="inline-flex items-center gap-1.5 rounded-sm border border-nano-border bg-white/5 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-nano-text hover:text-white"
                               >
                                 <Copy size={13} />
                                 {copiedAssetId === `${asset.id}:url` ? 'Copied' : 'Copy Link'}
@@ -590,7 +610,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                                 <button
                                   type="button"
                                   onClick={() => setPreviewAsset({ title: asset.title || 'Asset preview', url: previewUrl })}
-                                  className="inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
+                                  className="inline-flex items-center gap-1.5 rounded-sm border border-nano-border bg-white/5 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-nano-text hover:text-white"
                                 >
                                   <Maximize2 size={13} />
                                   View
@@ -602,7 +622,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                             <button
                               type="button"
                               onClick={() => copyAssetValue(asset, 'text')}
-                              className="inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
+                              className="inline-flex items-center gap-1.5 rounded-sm border border-nano-border bg-white/5 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-nano-text hover:text-white"
                             >
                               <Copy size={13} />
                               {copiedAssetId === `${asset.id}:text` ? 'Copied' : 'Copy Text'}
@@ -613,7 +633,10 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
                     </div>
                   );
                 })}
+                </div>
               </div>
+            ) : (
+              <p className="mt-3 text-sm text-nano-text">Expand to view and copy banners, files, and promotional text.</p>
             )}
           </section>
 
