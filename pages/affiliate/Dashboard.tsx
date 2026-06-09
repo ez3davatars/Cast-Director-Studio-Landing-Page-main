@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { Banknote, CheckCircle, Copy, CreditCard, FileText, Link as LinkIcon, Loader2, RefreshCw, ShieldAlert, UserCheck } from 'lucide-react';
+import { Banknote, CheckCircle, Copy, CreditCard, Download, FileText, Link as LinkIcon, Loader2, RefreshCw, ShieldAlert, UserCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 interface AffiliateDashboardProps {
@@ -35,6 +35,8 @@ const getAffiliatePayoutMethodLabel = (row: any) => {
 };
 
 const panelClass = 'rounded-sm border border-nano-border bg-black/40 p-5';
+const isImageAsset = (asset: any) => Boolean(asset.mime_type?.startsWith('image/')) || ['banner', 'logo'].includes(asset.type);
+const getAffiliateAssetUrl = (asset: any) => asset.public_url || asset.external_url || '';
 
 const getPublicSiteBaseUrl = () => {
   const configuredUrl = import.meta.env.VITE_PUBLIC_SITE_URL || import.meta.env.VITE_SITE_URL;
@@ -172,7 +174,7 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
             .limit(50),
           supabase
             .from('affiliate_assets')
-            .select('id, title, type, description, public_url, storage_path, width, height, created_at')
+            .select('id, title, type, description, copy_body, public_url, thumbnail_url, external_url, file_name, mime_type, width, height, created_at')
             .eq('is_active', true)
             .order('created_at', { ascending: false }),
         ]);
@@ -228,8 +230,8 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
 
   const copyAssetValue = async (asset: any, mode: 'url' | 'text') => {
     const value = mode === 'url'
-      ? asset.public_url || asset.storage_path || ''
-      : asset.description || '';
+      ? getAffiliateAssetUrl(asset)
+      : asset.copy_body || asset.description || '';
     if (!value) return;
     await navigator.clipboard.writeText(value);
     setCopiedAssetId(`${asset.id}:${mode}`);
@@ -531,48 +533,70 @@ const AffiliateDashboard: React.FC<AffiliateDashboardProps> = ({ session }) => {
               <p className="text-sm text-nano-text italic">No marketing assets are available yet.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {assets.map(asset => (
-                  <div key={asset.id} className="rounded-sm border border-nano-border bg-black/40 p-4">
-                    <div className="flex items-start gap-3">
-                      <FileText size={18} className="text-nano-yellow shrink-0 mt-0.5" />
-                      <div className="min-w-0">
+                {assets.map(asset => {
+                  const assetUrl = getAffiliateAssetUrl(asset);
+                  const previewUrl = asset.thumbnail_url || assetUrl;
+                  const copyText = asset.copy_body || asset.description || '';
+                  return (
+                    <div key={asset.id} className="overflow-hidden rounded-sm border border-nano-border bg-black/40">
+                      {assetUrl && isImageAsset(asset) ? (
+                        <div className="flex h-40 items-center justify-center border-b border-nano-border bg-white/[0.03]">
+                          <img
+                            src={previewUrl}
+                            alt=""
+                            className={asset.type === 'logo' ? 'max-h-full max-w-full object-contain p-5' : 'h-full w-full object-cover'}
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex h-24 items-center justify-center border-b border-nano-border bg-white/[0.03]">
+                          {assetUrl ? <Download size={24} className="text-nano-yellow" /> : <FileText size={24} className="text-nano-yellow" />}
+                        </div>
+                      )}
+                      <div className="p-4">
                         <div className="text-white font-bold">{asset.title}</div>
-                        <div className="text-xs text-nano-text uppercase tracking-wider mt-1">{asset.type}</div>
+                        <div className="mt-1 text-xs text-nano-text uppercase tracking-wider">{asset.type.replace('_', ' ')}</div>
                         {asset.description && <p className="text-sm text-nano-text mt-2">{asset.description}</p>}
-                        {(asset.public_url || asset.storage_path) && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <a
-                              href={asset.public_url || asset.storage_path}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center justify-center rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
-                            >
-                              Open Asset
-                            </a>
+                        {asset.copy_body && (
+                          <div className="mt-3 rounded-sm border border-nano-border bg-black/50 p-3">
+                            <p className="line-clamp-4 whitespace-pre-wrap text-sm text-nano-text">{asset.copy_body}</p>
+                          </div>
+                        )}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {assetUrl && (
+                            <>
+                              <a
+                                href={assetUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center justify-center rounded-sm border border-nano-yellow/30 bg-nano-yellow/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
+                              >
+                                Open Asset
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => copyAssetValue(asset, 'url')}
+                                className="inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
+                              >
+                                <Copy size={13} />
+                                {copiedAssetId === `${asset.id}:url` ? 'Copied' : 'Copy Link'}
+                              </button>
+                            </>
+                          )}
+                          {copyText && (
                             <button
                               type="button"
-                              onClick={() => copyAssetValue(asset, 'url')}
+                              onClick={() => copyAssetValue(asset, 'text')}
                               className="inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
                             >
                               <Copy size={13} />
-                              {copiedAssetId === `${asset.id}:url` ? 'Copied' : 'Copy Link'}
+                              {copiedAssetId === `${asset.id}:text` ? 'Copied' : 'Copy Text'}
                             </button>
-                          </div>
-                        )}
-                        {asset.description && (
-                          <button
-                            type="button"
-                            onClick={() => copyAssetValue(asset, 'text')}
-                            className="mt-2 inline-flex items-center gap-2 rounded-sm border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
-                          >
-                            <Copy size={13} />
-                            {copiedAssetId === `${asset.id}:text` ? 'Copied' : 'Copy Text'}
-                          </button>
-                        )}
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
