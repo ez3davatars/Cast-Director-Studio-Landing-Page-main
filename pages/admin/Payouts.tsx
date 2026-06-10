@@ -41,6 +41,109 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
+interface PayableGroupRow {
+  id: string;
+  type: string;
+  amount_cents: number;
+  currency: string | null;
+  hold_until: string | null;
+  created_at: string | null;
+}
+
+interface PayableGroup {
+  affiliate_id: string;
+  code: string;
+  contact_email: string;
+  paypal_email: string | null;
+  payout_method: string | null;
+  stripe_connect_account_id: string | null;
+  stripe_connect_payouts_enabled: boolean | null;
+  stripe_connect_onboarding_status: string | null;
+  minimum_payout_cents: number | null;
+  net_cents: number;
+  rows: PayableGroupRow[];
+  reversal_count: number;
+}
+
+const PAYABLE_FILTERS = [
+  { value: 'all', label: 'All eligible' },
+  { value: 'stripe_connect_ready', label: 'Stripe Connect ready' },
+  { value: 'manual', label: 'Manual payout' },
+  { value: 'selected', label: 'Selected' },
+] as const;
+
+type PayableFilter = (typeof PAYABLE_FILTERS)[number]['value'];
+
+const payoutMethodLabel = (group: PayableGroup) =>
+  group.payout_method === 'stripe_connect' ? 'Stripe Connect' : 'Manual';
+
+const payoutReadinessLabel = (group: PayableGroup) => {
+  if (group.payout_method === 'stripe_connect') {
+    return group.stripe_connect_account_id && group.stripe_connect_payouts_enabled
+      ? 'Stripe Connect ready'
+      : 'Setup incomplete';
+  }
+  return 'Manual payout';
+};
+
+const eligibilityLabelForPayable = (group: PayableGroup) => {
+  if (group.payout_method === 'stripe_connect') {
+    if (group.stripe_connect_account_id && group.stripe_connect_payouts_enabled) {
+      return 'Stripe Connect ready';
+    }
+    return 'Stripe setup incomplete';
+  }
+  return 'Manual payout';
+};
+
+const getPayableRowTypeLabel = (row: PayableGroupRow) => {
+  if (row.type === 'earned') return 'Earned';
+  if (row.type === 'reversal') return 'Reversal';
+  return row.type || 'Commission';
+};
+
+const matchesPayableSearch = (group: PayableGroup, query: string) => {
+  const tokens = [
+    group.code,
+    group.contact_email,
+    group.payout_method,
+    payoutReadinessLabel(group),
+    String(group.net_cents),
+    fmt(group.net_cents),
+    eligibilityLabelForPayable(group),
+    String(group.reversal_count),
+  ];
+
+  for (const row of group.rows) {
+    tokens.push(
+      row.type,
+      getPayableRowTypeLabel(row),
+      String(row.amount_cents),
+      fmt(row.amount_cents),
+      row.hold_until,
+      row.created_at,
+    );
+  }
+
+  const haystack = tokens.filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(query);
+};
+
+const payableMatchesFilter = (group: PayableGroup, filter: PayableFilter, selected: Set<string>) => {
+  if (filter === 'all') return true;
+  if (filter === 'selected') return selected.has(group.affiliate_id);
+  if (filter === 'stripe_connect_ready') return group.payout_method === 'stripe_connect' && group.stripe_connect_account_id && group.stripe_connect_payouts_enabled;
+  if (filter === 'manual') return group.payout_method !== 'stripe_connect';
+  return true;
+};
+
+const summaryForSelected = (groups: PayableGroup[], selected: Set<string>) => {
+  const selectedGroups = groups.filter(group => selected.has(group.affiliate_id));
+  const stripeConnect = selectedGroups.filter(group => group.payout_method === 'stripe_connect').length;
+  const manual = selectedGroups.filter(group => group.payout_method !== 'stripe_connect').length;
+  return { count: selectedGroups.length, stripeConnect, manual };
+};
+
 const toDateTimeLocal = (date: Date) => {
   const offsetMs = date.getTimezoneOffset() * 60 * 1000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
@@ -269,10 +372,28 @@ const batchMatchesFilter = (batch: any, filter: BatchFilter) => {
 const PayoutsAdmin: React.FC = () => {
   const [tab, setTab] = useState<PayoutsTab>('payable');
 
-  const [payableRows, setPayableRows] = useState<PayableRow[]>([]);
+  const [payableGroups, setPayableGroups] = useState<PayableGroup[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loadingPayable, setLoadingPayable] = useState(true);
   const [payableError, setPayableError] = useState<string | null>(null);
+  const [payableSearchQuery, setPayableSearchQuery] = useState('');
+  const [activePayableFilter, setActivePayableFilter] = useState<PayableFilter>('all');
+  const [expandedPayableGroups, setExpandedPayableGroups] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const raw = localStorage.getItem('cds_admin_payable_group_expanded');
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const filteredPayableGroups = payableGroups.filter(group => {
+    const query = payableSearchQuery.trim().toLowerCase();
+    if (!payableMatchesFilter(group, activePayableFilter, selected)) return false;
+    if (!query) return true;
+    return matchesPayableSearch(group, query);
+  });
 
   const [batchNotes, setBatchNotes] = useState('');
   const [isCreatingBatch, setIsCreatingBatch] = useState(false);
@@ -314,12 +435,14 @@ const PayoutsAdmin: React.FC = () => {
       const [ledgerRes, affiliatesRes] = await Promise.allSettled([
         supabase
           .from('commission_ledger')
-          .select('affiliate_id, type, amount_cents')
+          .select('id, affiliate_id, type, amount_cents, currency, hold_until, created_at')
           .is('payout_batch_id', null)
           .lte('hold_until', now),
         supabase
           .from('affiliates')
-          .select('id, code, contact_email, paypal_email, minimum_payout_cents')
+          .select(
+            'id, code, contact_email, paypal_email, minimum_payout_cents, payout_method, stripe_connect_account_id, stripe_connect_payouts_enabled, stripe_connect_onboarding_status'
+          )
           .eq('status', 'active'),
       ]);
 
@@ -332,29 +455,61 @@ const PayoutsAdmin: React.FC = () => {
           ? affiliatesRes.value.data || []
           : [];
 
-      const netMap = new Map<string, number>();
+      const groups = new Map<string, PayableGroup>();
       for (const row of ledgerData) {
-        const cur = netMap.get(row.affiliate_id) ?? 0;
-        netMap.set(row.affiliate_id, cur + (row.type === 'earned' ? row.amount_cents : -row.amount_cents));
+        const affiliateId = row.affiliate_id;
+        if (!affiliateId) continue;
+        const group = groups.get(affiliateId) || {
+          affiliate_id: affiliateId,
+          code: '',
+          contact_email: '',
+          paypal_email: null,
+          payout_method: null,
+          stripe_connect_account_id: null,
+          stripe_connect_payouts_enabled: null,
+          stripe_connect_onboarding_status: null,
+          minimum_payout_cents: null,
+          net_cents: 0,
+          rows: [],
+          reversal_count: 0,
+        };
+
+        group.net_cents += row.type === 'earned' ? row.amount_cents : -row.amount_cents;
+        group.rows.push({
+          id: row.id,
+          type: row.type,
+          amount_cents: row.amount_cents,
+          currency: row.currency || null,
+          hold_until: row.hold_until || null,
+          created_at: row.created_at || null,
+        });
+        if (row.type === 'reversal') group.reversal_count += 1;
+        groups.set(affiliateId, group);
       }
 
       const affMap = new Map(affiliatesData.map((a: any) => [a.id, a]));
-      const rows: PayableRow[] = [];
-      for (const [affId, net] of netMap.entries()) {
-        if (net <= 0) continue;
-        const aff = affMap.get(affId);
-        if (!aff || net < (aff.minimum_payout_cents ?? 5000)) continue;
-        rows.push({
-          affiliate_id: affId,
+      const finalGroups: PayableGroup[] = [];
+      for (const group of groups.values()) {
+        const aff = affMap.get(group.affiliate_id);
+        if (!aff) continue;
+        const minimum = aff.minimum_payout_cents ?? 0;
+        if (group.net_cents <= 0 || group.net_cents < minimum) continue;
+
+        finalGroups.push({
+          ...group,
           code: aff.code,
           contact_email: aff.contact_email || '',
           paypal_email: aff.paypal_email || null,
-          net_cents: net,
+          payout_method: aff.payout_method || null,
+          stripe_connect_account_id: aff.stripe_connect_account_id || null,
+          stripe_connect_payouts_enabled: aff.stripe_connect_payouts_enabled ?? null,
+          stripe_connect_onboarding_status: aff.stripe_connect_onboarding_status || null,
+          minimum_payout_cents: aff.minimum_payout_cents ?? null,
         });
       }
 
-      rows.sort((a, b) => b.net_cents - a.net_cents);
-      setPayableRows(rows);
+      finalGroups.sort((a, b) => b.net_cents - a.net_cents);
+      setPayableGroups(finalGroups);
     } catch (err: any) {
       setPayableError(err.message || 'Failed to load payable commissions');
     } finally {
@@ -449,6 +604,14 @@ const PayoutsAdmin: React.FC = () => {
     }
   }, [expandedBatches]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('cds_admin_payable_group_expanded', JSON.stringify(Array.from(expandedPayableGroups)));
+    } catch {
+      // ignore storage failure
+    }
+  }, [expandedPayableGroups]);
+
   useEffect(() => { loadPayable(); }, [loadPayable]);
   useEffect(() => { loadBatches(); }, [loadBatches]);
 
@@ -457,6 +620,15 @@ const PayoutsAdmin: React.FC = () => {
       const next = new Set(prev);
       if (next.has(batchId)) next.delete(batchId);
       else next.add(batchId);
+      return next;
+    });
+  };
+
+  const toggleGroupExpansion = (affiliateId: string) => {
+    setExpandedPayableGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(affiliateId)) next.delete(affiliateId);
+      else next.add(affiliateId);
       return next;
     });
   };
@@ -657,20 +829,22 @@ const PayoutsAdmin: React.FC = () => {
   };
 
   const toggleAll = () => {
-    if (selected.size === payableRows.length) setSelected(new Set());
-    else setSelected(new Set(payableRows.map(r => r.affiliate_id)));
+    if (selected.size === payableGroups.length) setSelected(new Set());
+    else setSelected(new Set(payableGroups.map(r => r.affiliate_id)));
   };
 
-  const selectedTotal = payableRows
+  const selectedTotal = payableGroups
     .filter(r => selected.has(r.affiliate_id))
     .reduce((s, r) => s + r.net_cents, 0);
+
+  const selectedSummary = summaryForSelected(payableGroups, selected);
 
   return (
     <div>
       <div className="mb-6">
         <h2 className="text-2xl font-bold font-mono tracking-wide">Payout Management</h2>
         <p className="text-sm text-nano-text mt-1">
-          Review payable commissions, create draft batches, and record manual payouts.
+          Review payable affiliate commissions, create payout batches, and send approved payouts manually or through Stripe Connect.
         </p>
       </div>
 
@@ -702,75 +876,179 @@ const PayoutsAdmin: React.FC = () => {
             <div className="space-y-2 animate-pulse">
               {[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-white/5 rounded" />)}
             </div>
-          ) : payableRows.length === 0 ? (
+          ) : payableGroups.length === 0 ? (
             <div className="bg-black border border-nano-border rounded-lg p-12 text-center">
               <DollarSign size={32} className="text-gray-600 mx-auto mb-3" />
               <p className="text-gray-500 italic text-sm">No affiliates with payable commissions.</p>
-              <p className="text-[10px] text-nano-text mt-1">Payable = past hold period, meets minimum, not yet batched.</p>
+              <p className="text-[10px] text-nano-text mt-1">
+                Payable commissions have passed the hold period, meet the affiliate's minimum payout, and are not already batched.
+              </p>
             </div>
           ) : (
             <>
-              <div className="bg-black border border-nano-border rounded-lg overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-nano-border text-[10px] uppercase tracking-widest text-nano-text bg-black/40">
-                      <th className="p-4 w-10">
-                        <input
-                          type="checkbox"
-                          checked={selected.size === payableRows.length && payableRows.length > 0}
-                          onChange={toggleAll}
-                          className="accent-yellow-400"
-                        />
-                      </th>
-                      <th className="p-4 font-bold">Affiliate</th>
-                      <th className="p-4 font-bold">PayPal Email</th>
-                      <th className="p-4 font-bold text-right">Net Payable</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payableRows.map(row => (
-                      <tr
-                        key={row.affiliate_id}
-                        onClick={() => toggleSelect(row.affiliate_id)}
-                        className={`border-b border-nano-border/50 cursor-pointer transition-colors ${selected.has(row.affiliate_id) ? 'bg-nano-yellow/5' : 'hover:bg-white/5'}`}
-                      >
-                        <td className="p-4 w-10">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(row.affiliate_id)}
-                            onChange={() => toggleSelect(row.affiliate_id)}
-                            onClick={e => e.stopPropagation()}
-                            className="accent-yellow-400"
-                          />
-                        </td>
-                        <td className="p-4">
-                          <div className="font-mono font-bold text-nano-yellow text-sm">{row.code}</div>
-                          <div className="text-[10px] text-nano-text mt-0.5">{row.contact_email || '-'}</div>
-                        </td>
-                        <td className="p-4 text-xs text-nano-text font-mono">
-                          {row.paypal_email || <span className="text-red-400 italic">No PayPal email set</span>}
-                        </td>
-                        <td className="p-4 text-right">
-                          <span className="font-mono font-bold text-white text-sm">{fmt(row.net_cents)}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t border-nano-border bg-white/5">
-                      <td colSpan={3} className="p-4 text-xs font-bold uppercase tracking-wider text-nano-text">
-                        {selected.size > 0 ? `${selected.size} selected` : 'Select affiliates to batch'}
-                      </td>
-                      <td className="p-4 text-right font-mono font-bold text-nano-yellow">
-                        {selected.size > 0 ? fmt(selectedTotal) : '-'}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-center">
+                  <div>
+                    <label htmlFor="payable-search" className="sr-only">Search payable commissions</label>
+                    <input
+                      id="payable-search"
+                      type="search"
+                      value={payableSearchQuery}
+                      onChange={e => setPayableSearchQuery(e.target.value)}
+                      placeholder="Search payable commissions by affiliate, email, amount, payout method, or status..."
+                      className="w-full rounded border border-nano-border bg-nano-dark px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-nano-yellow focus:outline-none"
+                    />
+                  </div>
+                  {(payableSearchQuery || activePayableFilter !== 'all') && (
+                    <button
+                      onClick={() => {
+                        setPayableSearchQuery('');
+                        setActivePayableFilter('all');
+                      }}
+                      className="inline-flex items-center justify-center rounded border border-nano-border bg-black/50 px-3 py-2 text-xs uppercase tracking-widest text-nano-text hover:bg-white/5"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {PAYABLE_FILTERS.map(filter => (
+                    <button
+                      key={filter.value}
+                      onClick={() => setActivePayableFilter(filter.value)}
+                      className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${
+                        activePayableFilter === filter.value
+                          ? 'border-nano-yellow bg-nano-yellow/10 text-nano-yellow'
+                          : 'border-nano-border bg-black/40 text-nano-text hover:bg-white/5'
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-nano-text">
+                  Payable = past hold period, meets minimum, and not yet batched.
+                </p>
               </div>
 
+              {filteredPayableGroups.length === 0 ? (
+                <div className="bg-black border border-nano-border rounded-lg p-12 text-center">
+                  <DollarSign size={32} className="text-gray-600 mx-auto mb-3" />
+                  <p className="text-gray-500 italic text-sm">No payable commissions match your search.</p>
+                  <p className="text-[10px] text-nano-text mt-1">Try a different query or clear your filters.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredPayableGroups.map(group => {
+                    const isExpanded = expandedPayableGroups.has(group.affiliate_id);
+                    return (
+                      <div key={group.affiliate_id} className="rounded-2xl border border-nano-border bg-black/40">
+                        <div className="grid grid-cols-12 gap-3 p-4 items-center">
+                          <div className="col-span-1 flex items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(group.affiliate_id)}
+                              onChange={() => toggleSelect(group.affiliate_id)}
+                              className="accent-yellow-400"
+                            />
+                          </div>
+                          <div className="col-span-11 sm:col-span-4">
+                            <div className="text-[10px] uppercase tracking-widest text-nano-text">Affiliate</div>
+                            <div className="mt-1 font-mono text-sm text-nano-yellow truncate">{group.code}</div>
+                            <div className="text-[10px] text-nano-text truncate">{group.contact_email || '-'}</div>
+                          </div>
+                          <div className="col-span-6 sm:col-span-2">
+                            <div className="text-[10px] uppercase tracking-widest text-nano-text">Net payable</div>
+                            <div className="mt-1 font-mono text-sm text-white">{fmt(group.net_cents)}</div>
+                          </div>
+                          <div className="col-span-6 sm:col-span-2">
+                            <div className="text-[10px] uppercase tracking-widest text-nano-text">Method</div>
+                            <div className="mt-1 text-[10px] text-white">{payoutMethodLabel(group)}</div>
+                            <div className="mt-1 text-[10px] text-nano-yellow">{payoutReadinessLabel(group)}</div>
+                          </div>
+                          <div className="col-span-6 sm:col-span-2">
+                            <div className="text-[10px] uppercase tracking-widest text-nano-text">Rows</div>
+                            <div className="mt-1 text-sm text-white">{group.rows.length}</div>
+                            {group.reversal_count > 0 && (
+                              <div className="mt-1 text-[10px] text-orange-300">{group.reversal_count} reversal{group.reversal_count > 1 ? 's' : ''}</div>
+                            )}
+                          </div>
+                          <div className="col-span-6 sm:col-span-2 flex justify-end items-center gap-2">
+                            <button
+                              onClick={() => toggleGroupExpansion(group.affiliate_id)}
+                              aria-expanded={isExpanded}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] uppercase tracking-wide text-nano-text bg-white/5 border border-nano-border rounded hover:bg-white/10 transition-colors"
+                            >
+                              <span>{isExpanded ? 'Hide details' : 'Details'}</span>
+                              <ChevronDown className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-0'}`} />
+                            </button>
+                          </div>
+                        </div>
+                        {isExpanded && (
+                          <div className="border-t border-nano-border p-4 max-h-[360px] overflow-y-auto">
+                            <div className="grid grid-cols-12 gap-3 text-[10px] uppercase tracking-widest text-nano-text bg-black/30 rounded-t-lg px-4 py-3">
+                              <div className="col-span-4 sm:col-span-3">Type</div>
+                              <div className="col-span-2 text-right">Amount</div>
+                              <div className="col-span-3">Hold until</div>
+                              <div className="col-span-3">Created</div>
+                            </div>
+                            <div className="divide-y divide-nano-border">
+                              {group.rows.map(row => (
+                                <div key={row.id} className="grid grid-cols-12 gap-3 px-4 py-3 items-center text-[11px] text-nano-text">
+                                  <div className="col-span-4 sm:col-span-3">
+                                    <div className="font-bold text-white">{getPayableRowTypeLabel(row)}</div>
+                                    <div className="text-[10px] text-gray-500">{row.currency || 'USD'}</div>
+                                  </div>
+                                  <div className="col-span-2 text-right font-mono text-white">{fmt(row.amount_cents)}</div>
+                                  <div className="col-span-3">
+                                    {row.hold_until ? new Date(row.hold_until).toLocaleDateString() : '—'}
+                                  </div>
+                                  <div className="col-span-3 truncate">{row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}</div>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="mt-4 grid gap-3 sm:grid-cols-3 text-[10px] text-nano-text">
+                              <div>
+                                <div className="text-gray-500 uppercase tracking-widest">Minimum payout</div>
+                                <div className="mt-1 text-white">{group.minimum_payout_cents ? fmt(group.minimum_payout_cents) : '-'}</div>
+                              </div>
+                              <div>
+                                <div className="text-gray-500 uppercase tracking-widest">Payable since</div>
+                                <div className="mt-1 text-white">{group.rows[0]?.created_at ? new Date(group.rows[0].created_at).toLocaleDateString() : '-'}</div>
+                              </div>
+                              <div>
+                                <div className="text-gray-500 uppercase tracking-widest">Destination</div>
+                                <div className="mt-1 text-white">{group.paypal_email || (group.payout_method === 'stripe_connect' ? 'Stripe Connect' : 'Not set')}</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="bg-black border border-nano-border rounded-lg p-5">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-nano-text mb-3">Create Draft Batch</h3>
+                <div className="mb-4 grid gap-3 text-[10px] text-nano-text sm:grid-cols-3">
+                  <div>
+                    <div className="uppercase tracking-widest text-gray-500">Selected affiliates</div>
+                    <div className="mt-1 font-mono text-white">{selectedSummary.count}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-widest text-gray-500">Stripe Connect</div>
+                    <div className="mt-1 font-mono text-white">{selectedSummary.stripeConnect}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-widest text-gray-500">Manual payout</div>
+                    <div className="mt-1 font-mono text-white">{selectedSummary.manual}</div>
+                  </div>
+                </div>
+                {selectedSummary.stripeConnect > 0 && selectedSummary.manual > 0 && (
+                  <div className="mb-4 rounded border border-orange-500/30 bg-orange-500/10 p-3 text-xs text-orange-300">
+                    Selected affiliates include both manual and Stripe Connect payout methods.
+                  </div>
+                )}
                 <div className="mb-3">
                   <label className="block text-gray-500 text-xs uppercase tracking-wider mb-1">Notes (optional)</label>
                   <input
