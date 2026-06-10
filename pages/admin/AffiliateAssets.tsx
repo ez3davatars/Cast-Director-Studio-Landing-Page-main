@@ -43,6 +43,14 @@ const emptyForm = {
   is_active: true,
 };
 
+const STATUS_FILTERS = ['all', 'active', 'inactive', 'archived'] as const;
+const SORT_OPTIONS = [
+  { value: 'updated_desc', label: 'Newest updated' },
+  { value: 'updated_asc', label: 'Oldest updated' },
+  { value: 'title_asc', label: 'Title A → Z' },
+  { value: 'title_desc', label: 'Title Z → A' },
+];
+
 const isImageMime = (mime?: string | null) => Boolean(mime?.startsWith('image/'));
 const formatBytes = (bytes?: number | null) => {
   if (!bytes) return '-';
@@ -65,6 +73,31 @@ const slugifyFileName = (name: string) => {
 
 const getAssetUrl = (asset: any) => asset.public_url || asset.external_url || '';
 
+const downloadAsset = async (asset: any) => {
+  const url = getAssetUrl(asset);
+  if (!url) return;
+
+  const fileName = asset.file_name || `${slugifyFileName(asset.title || 'affiliate-asset')}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Download failed');
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+};
+
 const AffiliateAssetsAdmin: React.FC = () => {
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +112,10 @@ const AffiliateAssetsAdmin: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | string>('all');
+  const [sortOption, setSortOption] = useState(SORT_OPTIONS[0].value);
   const [previewAsset, setPreviewAsset] = useState<{ title: string; url: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -115,12 +152,56 @@ const AffiliateAssetsAdmin: React.FC = () => {
   const activeCount = useMemo(() => assets.filter(asset => asset.is_active && !asset.archived_at).length, [assets]);
   const archivedCount = useMemo(() => assets.filter(asset => asset.archived_at).length, [assets]);
 
+  const filteredAssets = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    return assets
+      .filter(asset => {
+        if (statusFilter === 'active' && !(asset.is_active && !asset.archived_at)) return false;
+        if (statusFilter === 'inactive' && !(asset.is_active === false && !asset.archived_at)) return false;
+        if (statusFilter === 'archived' && !asset.archived_at) return false;
+        if (typeFilter !== 'all' && asset.type !== typeFilter) return false;
+        if (!normalizedSearch) return true;
+        const haystack = `${asset.title || ''} ${asset.description || ''} ${asset.type || ''} ${asset.file_name || ''}`.toLowerCase();
+        return haystack.includes(normalizedSearch);
+      })
+      .sort((a, b) => {
+        if (sortOption === 'updated_desc') {
+          return new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime();
+        }
+        if (sortOption === 'updated_asc') {
+          return new Date(a.updated_at || a.created_at || 0).getTime() - new Date(b.updated_at || b.created_at || 0).getTime();
+        }
+        if (sortOption === 'title_asc') {
+          return String(a.title || '').localeCompare(String(b.title || ''));
+        }
+        if (sortOption === 'title_desc') {
+          return String(b.title || '').localeCompare(String(a.title || ''));
+        }
+        return 0;
+      });
+  }, [assets, searchQuery, statusFilter, typeFilter, sortOption]);
+
+  const resultCount = filteredAssets.length;
+  const filtersActive = Boolean(
+    searchQuery.trim() ||
+    statusFilter !== 'all' ||
+    typeFilter !== 'all' ||
+    sortOption !== SORT_OPTIONS[0].value
+  );
+
   const openCreate = () => {
     setEditingAsset(null);
     setForm(emptyForm);
     setSelectedFile(null);
     setSaveError(null);
     setIsEditorOpen(true);
+  };
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('all');
+    setTypeFilter('all');
+    setSortOption(SORT_OPTIONS[0].value);
   };
 
   const openEdit = (asset: any) => {
@@ -360,15 +441,14 @@ const AffiliateAssetsAdmin: React.FC = () => {
       <div className="flex flex-wrap items-center gap-2">
         {url && (
           <>
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => downloadAsset(asset)}
               className="rounded border border-nano-border bg-white/5 p-1.5 text-nano-text hover:text-white"
-              title="Open asset"
+              title="Download asset"
             >
-              <LinkIcon size={14} />
-            </a>
+              <Download size={14} />
+            </button>
             <button
               type="button"
               onClick={() => copyValue(`${asset.id}:url`, url)}
@@ -441,28 +521,98 @@ const AffiliateAssetsAdmin: React.FC = () => {
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold font-mono tracking-wide">Affiliate Assets</h2>
-          <p className="text-sm text-nano-text mt-1">Upload and manage shareable creative files and copy for active affiliates.</p>
+          <p className="text-sm text-nano-text mt-1">Upload, filter, and sort shareable affiliate creative assets without affecting live active content.</p>
           <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
             <span className="rounded border border-green-400/30 bg-green-400/10 px-2 py-1 text-green-400">{activeCount} Active</span>
             <span className="rounded border border-nano-border bg-white/5 px-2 py-1 text-nano-text">{archivedCount} Archived</span>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setViewMode(viewMode === 'cards' ? 'list' : 'cards')}
-            className="inline-flex items-center gap-2 rounded border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
-          >
-            {viewMode === 'cards' ? <List size={14} /> : <Grid2X2 size={14} />}
-            {viewMode === 'cards' ? 'List' : 'Cards'}
-          </button>
-          <button
-            type="button"
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 rounded border border-nano-yellow/30 bg-nano-yellow/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
-          >
-            <Plus size={14} /> New Asset
-          </button>
+      </div>
+
+      <div className="sticky top-4 z-20 mb-5 rounded-xl border border-nano-border bg-black/95 p-4 shadow-xl shadow-black/20 backdrop-blur-sm">
+        <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-widest text-gray-400">Filter assets</div>
+            <div className="mt-1 text-sm text-nano-text">Showing {resultCount} of {assets.length} total assets.</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {filtersActive && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="inline-flex items-center gap-2 rounded border border-nano-border bg-transparent px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:bg-white/5 hover:text-white"
+              >
+                Reset filters
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setViewMode(viewMode === 'cards' ? 'list' : 'cards')}
+              className="inline-flex items-center gap-2 rounded border border-nano-border bg-white/5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-text hover:text-white"
+            >
+              {viewMode === 'cards' ? <List size={14} /> : <Grid2X2 size={14} />}
+              {viewMode === 'cards' ? 'List' : 'Cards'}
+            </button>
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded border border-nano-yellow/30 bg-nano-yellow/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nano-yellow hover:bg-nano-yellow/20"
+            >
+              <Plus size={14} /> New Asset
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-[1.7fr_1fr] xl:grid-cols-[1.4fr_1fr]">
+          <label className="block">
+            <span className="mb-2 block text-[11px] uppercase tracking-widest text-gray-400">Search assets</span>
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search title, description, file name, or type"
+              className="w-full rounded border border-nano-border bg-black px-3 py-2 text-sm text-white outline-none transition-colors focus:border-nano-yellow"
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="block">
+              <span className="mb-2 block text-[11px] uppercase tracking-widest text-gray-400">Status</span>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value as (typeof STATUS_FILTERS)[number])}
+                className="w-full rounded border border-nano-border bg-black px-3 py-2 text-sm text-white outline-none focus:border-nano-yellow"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="archived">Archived</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-[11px] uppercase tracking-widest text-gray-400">Type</span>
+              <select
+                value={typeFilter}
+                onChange={e => setTypeFilter(e.target.value)}
+                className="w-full rounded border border-nano-border bg-black px-3 py-2 text-sm text-white outline-none focus:border-nano-yellow"
+              >
+                <option value="all">All types</option>
+                {ASSET_TYPES.map(type => (
+                  <option key={type} value={type}>{type.replace('_', ' ')}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-[11px] uppercase tracking-widest text-gray-400">Sort</span>
+              <select
+                value={sortOption}
+                onChange={e => setSortOption(e.target.value)}
+                className="w-full rounded border border-nano-border bg-black px-3 py-2 text-sm text-white outline-none focus:border-nano-yellow"
+              >
+                {SORT_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -473,25 +623,30 @@ const AffiliateAssetsAdmin: React.FC = () => {
       )}
 
       {loading ? (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,420px))] justify-start gap-4 animate-pulse">
-          {[...Array(6)].map((_, i) => <div key={i} className="h-80 rounded bg-white/5" />)}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,320px))] justify-start gap-4 animate-pulse">
+          {[...Array(6)].map((_, i) => <div key={i} className="h-72 rounded bg-white/5" />)}
         </div>
       ) : assets.length === 0 ? (
         <div className="rounded-lg border border-nano-border bg-black p-12 text-center">
           <UploadCloud size={34} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-sm italic text-gray-500">No affiliate assets yet.</p>
+          <p className="text-sm italic text-gray-500">No affiliate assets yet. Add a new file or text asset to start sharing branded content.</p>
+        </div>
+      ) : filteredAssets.length === 0 ? (
+        <div className="rounded-lg border border-nano-border bg-black p-12 text-center">
+          <UploadCloud size={34} className="mx-auto mb-3 text-gray-600" />
+          <p className="text-sm italic text-gray-500">No assets match your search and filters. Clear filters or try a different keyword.</p>
         </div>
       ) : viewMode === 'cards' ? (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,420px))] justify-start gap-4">
-          {assets.map(asset => (
-            <div key={asset.id} className="flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-nano-border bg-black/70">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,280px))] justify-start gap-3">
+          {filteredAssets.map(asset => (
+            <div key={asset.id} className="flex min-h-[380px] flex-col overflow-hidden rounded-lg border border-nano-border bg-black/70">
               <button
                 type="button"
                 onClick={() => {
                   const url = asset.thumbnail_url || getAssetUrl(asset);
                   if (url && (isImageMime(asset.mime_type) || asset.type === 'logo')) setPreviewAsset({ title: asset.title || 'Asset preview', url });
                 }}
-                className="flex h-64 w-full items-center justify-center overflow-hidden border-b border-nano-border bg-black/50 p-3"
+                className="flex h-56 w-full items-center justify-center overflow-hidden border-b border-nano-border bg-black/50 p-2"
                 title="View full preview"
               >
                 {renderPreview(asset)}
@@ -524,33 +679,33 @@ const AffiliateAssetsAdmin: React.FC = () => {
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-nano-border bg-black/40 text-[10px] uppercase tracking-widest text-nano-text">
-                <th className="p-4">Asset</th>
-                <th className="p-4">Type</th>
-                <th className="p-4">File</th>
-                <th className="p-4">Status</th>
-                <th className="p-4">Updated</th>
-                <th className="p-4 text-right">Actions</th>
+                <th className="p-2 text-left">Asset</th>
+                <th className="p-2 text-left">Type</th>
+                <th className="p-2 text-left">File</th>
+                <th className="p-2 text-left">Status</th>
+                <th className="p-2 text-left">Updated</th>
+                <th className="p-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {assets.map(asset => (
+              {filteredAssets.map(asset => (
                 <tr key={asset.id} className="border-b border-nano-border/50 hover:bg-white/5">
-                  <td className="p-4">
-                    <div className="font-bold text-white">{asset.title}</div>
-                    {asset.description && <div className="mt-1 max-w-[300px] truncate text-xs text-nano-text">{asset.description}</div>}
+                  <td className="p-2 align-top">
+                    <div className="font-bold text-white text-sm">{asset.title}</div>
+                    {asset.description && <div className="mt-1 max-w-[220px] truncate text-[11px] text-nano-text">{asset.description}</div>}
                   </td>
-                  <td className="p-4 text-xs uppercase tracking-wider text-nano-text">{asset.type}</td>
-                  <td className="p-4 text-xs font-mono text-nano-text">{asset.file_name || '-'}</td>
-                  <td className="p-4">
+                  <td className="p-2 text-xs uppercase tracking-wider text-nano-text align-top">{asset.type}</td>
+                  <td className="p-2 text-[11px] font-mono text-nano-text align-top">{asset.file_name || '-'}</td>
+                  <td className="p-2 align-top">
                     <span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${asset.archived_at ? 'border-gray-500/40 bg-gray-500/10 text-gray-400' : asset.is_active ? 'border-green-400/30 bg-green-400/10 text-green-400' : 'border-nano-border bg-white/5 text-nano-text'}`}>
                       {asset.archived_at ? 'Archived' : asset.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td className="p-4 text-[11px] font-mono text-nano-text">
+                  <td className="p-2 text-[11px] font-mono text-nano-text align-top">
                     {asset.updated_at ? new Date(asset.updated_at).toLocaleDateString() : '-'}
                   </td>
-                  <td className="p-4 text-right">
-                    <div className="flex justify-end">{renderAssetActions(asset)}</div>
+                  <td className="p-2 text-right align-top">
+                    <div className="flex justify-end gap-1">{renderAssetActions(asset)}</div>
                     {copied?.startsWith(asset.id) && <div className="mt-1 text-[10px] text-green-400">Copied</div>}
                   </td>
                 </tr>
@@ -744,9 +899,22 @@ const AffiliateAssetsAdmin: React.FC = () => {
           <div className="w-full max-w-6xl rounded-lg border border-nano-border bg-nano-panel shadow-2xl">
             <div className="flex items-center justify-between border-b border-nano-border px-5 py-4">
               <span className="truncate text-sm font-bold uppercase tracking-widest text-white">{previewAsset.title}</span>
-              <button onClick={() => setPreviewAsset(null)} className="text-nano-text hover:text-white" title="Close preview">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const asset = assets.find(a => a.thumbnail_url === previewAsset.url || getAssetUrl(a) === previewAsset.url);
+                    if (asset) downloadAsset(asset);
+                  }}
+                  className="text-nano-text hover:text-white transition-colors"
+                  title="Download asset"
+                >
+                  <Download size={16} />
+                </button>
+                <button onClick={() => setPreviewAsset(null)} className="text-nano-text hover:text-white" title="Close preview">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <div className="flex max-h-[80vh] items-center justify-center overflow-hidden bg-black/60 p-4">
               <img src={previewAsset.url} alt="" className="max-h-[78vh] max-w-[90vw] object-contain" />
