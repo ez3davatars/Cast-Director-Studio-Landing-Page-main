@@ -4,13 +4,26 @@ import AdminSearchFilter from '../../components/AdminSearchFilter';
 import { useNavigate } from 'react-router-dom';
 import { ExternalLink, Terminal } from 'lucide-react';
 
+const FILTER_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'failed', label: 'Failed' },
+  { key: 'processed', label: 'Processed' },
+  { key: 'checkout', label: 'Checkout' },
+  { key: 'invoice', label: 'Invoice' },
+  { key: 'refund', label: 'Refund' },
+  { key: 'affiliate', label: 'Affiliate-related' },
+] as const;
+
+const formatDateTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString() : '—';
+
 const WebhooksAdmin: React.FC = () => {
   const [data, setData] = useState<any[]>([]);
   const [contactsMap, setContactsMap] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  
+  const [activeFilter, setActiveFilter] = useState<(typeof FILTER_OPTIONS)[number]['key']>('all');
   const [selectedPayload, setSelectedPayload] = useState<any | null>(null);
   const navigate = useNavigate();
 
@@ -72,15 +85,82 @@ const WebhooksAdmin: React.FC = () => {
       return { email: em, stripeId: sid, contactId };
   };
 
-  const filtered = data.filter(d => 
-    JSON.stringify(d).toLowerCase().includes(search.toLowerCase())
-  );
+  const getStripeObjectId = (row: any) => {
+    return row.payload?.data?.object?.id || row.payload?.data?.object?.invoice || row.payload?.data?.object?.payment_intent || row.payload?.data?.object?.charge || '—';
+  };
+
+  const getAffiliateTag = (row: any) => {
+    return row.payload?.data?.object?.metadata?.affiliate_session_token
+      || row.payload?.data?.object?.metadata?.affiliate_id
+      || row.payload?.data?.object?.metadata?.affiliate_code
+      || null;
+  };
+
+  const getEventPass = (row: any) => {
+    const type = row.event_type?.toString?.() || '';
+    const affiliateMetadata = getAffiliateTag(row);
+    return {
+      isCheckout: type.startsWith('checkout.') || row.payload?.data?.object?.object === 'checkout.session',
+      isInvoice: type.startsWith('invoice.') || row.payload?.data?.object?.object === 'invoice',
+      isRefund: type.includes('refund') || row.payload?.data?.object?.object === 'refund',
+      isAffiliateRelated: Boolean(affiliateMetadata || type === 'checkout.session.completed' || type === 'invoice.payment_succeeded' || type === 'invoice.payment_failed'),
+      affiliateMetadata,
+    };
+  };
+
+  const filtered = data.filter((row) => {
+    const expanded = JSON.stringify({
+      ...row,
+      payload: row.payload ? { ...row.payload, data: row.payload.data } : row.payload,
+    }).toLowerCase();
+    const searchMatch = expanded.includes(search.toLowerCase());
+    const eventPass = getEventPass(row);
+
+    const statusMatch =
+      activeFilter === 'all' ||
+      (activeFilter === 'pending' && (row.processing_status === 'pending' || !row.processed_at)) ||
+      (activeFilter === 'failed' && (row.processing_status === 'failed' || Boolean(row.error_message))) ||
+      (activeFilter === 'processed' && row.processing_status === 'processed');
+
+    const typeMatch =
+      activeFilter === 'all' ||
+      (activeFilter === 'checkout' && eventPass.isCheckout) ||
+      (activeFilter === 'invoice' && eventPass.isInvoice) ||
+      (activeFilter === 'refund' && eventPass.isRefund) ||
+      (activeFilter === 'affiliate' && eventPass.isAffiliateRelated);
+
+    return searchMatch && statusMatch && typeMatch;
+  });
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6 font-mono tracking-wide">Webhook Traces</h2>
-      <AdminSearchFilter value={search} onChange={setSearch} placeholder="Search exact webhook streams or parsed identity traces..." />
-      
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold mb-3 font-mono tracking-wide">Webhook Monitor</h2>
+        <p className="max-w-3xl text-sm text-nano-text">Inspect Stripe webhook events, fulfillment traces, affiliate attribution, and processing issues.</p>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1.7fr_auto]">
+          <AdminSearchFilter
+            value={search}
+            onChange={setSearch}
+            placeholder="Search event type, trace id, customer, order, affiliate, or error message..."
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {FILTER_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setActiveFilter(option.key)}
+                className={`rounded-full border px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition ${activeFilter === option.key ? 'border-nano-yellow bg-nano-yellow/15 text-nano-yellow' : 'border-nano-border bg-black/70 text-nano-text hover:border-white/20 hover:text-white'}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 rounded-xl border border-nano-border bg-black/40 p-4 text-sm text-gray-400">
+          Use this page to debug missing licenses, failed fulfillment, affiliate commission issues, refunds, and webhook retries.
+        </div>
+      </div>
+
       {error && (
         <div className="bg-orange-500/10 border border-orange-500/50 text-orange-400 p-4 rounded mb-6 font-mono text-sm max-w-3xl leading-relaxed">
           <strong>Operational Notice:</strong> The physical database schema likely lacks the specific structural columns (<code>event_type</code>, <code>processing_status</code>, etc.) required for the advanced trace view. 
@@ -98,46 +178,57 @@ const WebhooksAdmin: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-nano-border text-[10px] uppercase tracking-widest text-nano-text bg-black/40">
-                <th className="p-4 font-bold">Event Matrix</th>
-                <th className="p-4 font-bold">Processing Status</th>
-                <th className="p-4 font-bold">Inferred Identity Anchor</th>
+                <th className="p-4 font-bold">Event type</th>
+                <th className="p-4 font-bold">Stripe event / trace</th>
+                <th className="p-4 font-bold">Status</th>
+                <th className="p-4 font-bold">Matched customer / order / affiliate</th>
+                <th className="p-4 font-bold">Created at</th>
+                <th className="p-4 font-bold">Processed at</th>
+                <th className="p-4 font-bold">Error summary</th>
                 <th className="p-4 font-bold">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-8 text-center text-gray-500 italic text-sm">No localized webhooks matched trace criteria.</td>
+                  <td colSpan={8} className="p-8 text-center text-gray-500 italic text-sm">No webhook events matched the current filter and search criteria.</td>
                 </tr>
               ) : (
                 filtered.map((row) => {
                   const { email, stripeId, contactId } = resolveIdentity(row);
+                  const stripeObjectId = getStripeObjectId(row);
+                  const { affiliateMetadata } = getEventPass(row);
 
                   return (
                     <tr key={row.id} className="border-b border-nano-border/50 hover:bg-white/5 transition-colors">
                       <td className="p-4">
-                         <div className="font-bold text-white max-w-[250px] truncate" title={row.event_type}>{row.event_type || 'unclassified.event'}</div>
-                         <div className="text-[10px] text-nano-text font-mono mt-0.5 select-all text-ellipsis overflow-hidden">{row.id || 'TRACE UNKNOWN'}</div>
+                         <div className="font-bold text-white max-w-[240px] truncate" title={row.event_type}>{row.event_type || 'unclassified.event'}</div>
+                         <div className="text-[10px] text-nano-text mt-1">{row.payload?.type || row.payload?.data?.object?.object || 'stripe webhook'}</div>
                       </td>
                       <td className="p-4">
-                         <div className="text-[10px] items-center flex gap-1 mt-0.5 uppercase">
-                            <span className={row.processing_status === 'processed' ? 'text-green-400' : 'text-nano-yellow font-mono'}>{row.processing_status || 'UNKNOWN'}</span>
-                            <span className="text-gray-500">|</span>
-                            <span className="text-nano-text font-mono"><span className="text-gray-500">retries:</span> {row.retry_count || 0}</span>
+                         <div className="text-[11px] font-mono text-nano-text truncate max-w-[180px]" title={row.payload?.id || row.id}>{row.payload?.id || row.id}</div>
+                         {row.id && <div className="text-[10px] text-gray-500 mt-1">trace {String(row.id).slice(0, 12)}</div>}
+                      </td>
+                      <td className="p-4">
+                         <div className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold uppercase ${row.processing_status === 'processed' ? 'bg-green-500/10 text-green-300 border border-green-500/20' : row.processing_status === 'failed' ? 'bg-red-500/10 text-red-300 border border-red-500/20' : 'bg-nano-border text-nano-text border border-nano-border'}`}>
+                            {row.processing_status || 'unknown'}
                          </div>
-                         {row.error_message && (
-                             <div className="text-[10px] text-red-400 font-mono mt-1 opacity-80 truncate max-w-[150px]">
-                                {row.error_message}
-                             </div>
+                         {row.retry_count != null && (
+                           <div className="text-[10px] text-gray-500 mt-1">Retries: {row.retry_count}</div>
                          )}
                       </td>
                       <td className="p-4">
-                         <div className="text-white font-bold text-sm truncate max-w-[200px]">{email || stripeId || 'No Readable Identity Node'}</div>
-                         <div className="text-[10px] text-gray-500 mt-0.5 flex flex-col gap-0.5 font-mono">
-                            <div><span className="text-nano-text mr-1">T-Zero:</span> {row.created_at ? new Date(row.created_at).toLocaleString() : 'Unknown Timing'}</div>
-                            <div><span className="text-nano-text mr-1">T-End:</span> {row.processed_at ? new Date(row.processed_at).toLocaleString() : 'Pending'}</div>
-                         </div>
+                         {email ? <div className="text-sm font-bold text-white truncate" title={email}>Customer: {email}</div> : stripeId ? <div className="text-sm font-bold text-white truncate">Customer: {stripeId}</div> : <div className="text-sm text-nano-text">No matched customer</div>}
+                         {stripeObjectId && stripeObjectId !== '—' && (
+                           <div className="text-[11px] text-gray-400 truncate">Object: {stripeObjectId}</div>
+                         )}
+                         {affiliateMetadata && (
+                           <div className="text-[11px] text-nano-yellow truncate">Affiliate token: {affiliateMetadata}</div>
+                         )}
                       </td>
+                      <td className="p-4 text-[11px] font-mono text-nano-text">{formatDateTime(row.created_at)}</td>
+                      <td className="p-4 text-[11px] font-mono text-nano-text">{formatDateTime(row.processed_at)}</td>
+                      <td className="p-4 text-[11px] font-mono text-red-400 truncate max-w-[220px]">{row.error_message || '—'}</td>
                       <td className="p-4">
                          <div className="flex flex-col gap-2 items-start">
                              <button
@@ -176,7 +267,7 @@ const WebhooksAdmin: React.FC = () => {
             </div>
             <div className="flex-1 overflow-y-auto p-4 bg-black">
                <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap leading-relaxed">
-                   {JSON.stringify(selectedPayload, null, 2)}
+                   {JSON.stringify(selectedPayload.payload || selectedPayload, null, 2)}
                </pre>
             </div>
             <div className="h-12 border-t border-nano-border px-6 flex items-center justify-between flex-shrink-0 bg-black/40">
