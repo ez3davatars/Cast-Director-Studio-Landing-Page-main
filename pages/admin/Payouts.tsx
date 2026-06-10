@@ -113,6 +113,159 @@ const getPayoutDisplayState = (item: any): PayoutDisplayState => {
   return 'Manual payout';
 };
 
+const BATCH_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'retryable', label: 'Retryable' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'transferred', label: 'Transferred' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'manual', label: 'Manual' },
+  { value: 'stripe_connect', label: 'Stripe Connect' },
+] as const;
+
+type BatchFilter = (typeof BATCH_FILTERS)[number]['value'];
+
+const getAffiliateFromItem = (item: any) =>
+  Array.isArray(item.affiliates) ? item.affiliates[0] : item.affiliates;
+
+const isStripeConnectReadyForItem = (item: any) => {
+  const affiliate = getAffiliateFromItem(item);
+  return affiliate?.payout_method === 'stripe_connect'
+    && affiliate?.stripe_connect_account_id
+    && affiliate?.stripe_connect_payouts_enabled;
+};
+
+const getBatchAffiliateSummary = (batch: any) => {
+  const payoutItems = Array.isArray(batch.payout_items) ? batch.payout_items : [];
+  const affiliates = payoutItems
+    .map(getAffiliateFromItem)
+    .filter(Boolean);
+
+  if (affiliates.length === 0) {
+    return { count: 0, label: 'No affiliates', sub: '-' };
+  }
+
+  const first = affiliates[0];
+  if (affiliates.length === 1) {
+    return {
+      count: 1,
+      label: first.code || 'Unknown affiliate',
+      sub: first.contact_email || '-',
+    };
+  }
+
+  return {
+    count: affiliates.length,
+    label: `${affiliates.length} affiliates`,
+    sub: `${first.code || 'Unknown'} • ${first.contact_email || '-'}`,
+  };
+};
+
+const getBatchStatusSummary = (batch: any) => {
+  const payoutItems = Array.isArray(batch.payout_items) ? batch.payout_items : [];
+  const retryableItem = payoutItems.find((item: any) =>
+    isRetryableStripeFailure(item)
+    && !item.stripe_transfer_id
+    && isStripeConnectReadyForItem(item)
+  );
+  if (retryableItem) {
+    return 'Balance unavailable — retry after funds clear';
+  }
+
+  const transferredItem = payoutItems.find((item: any) =>
+    item.stripe_transfer_id || item.stripe_payout_id
+  );
+  if (transferredItem) {
+    return `Transferred: ${truncateId(transferredItem.stripe_transfer_id || transferredItem.stripe_payout_id)}`;
+  }
+
+  if (batch.status === 'paid') {
+    return 'Paid';
+  }
+
+  const stripeItem = payoutItems.find((item: any) => getAffiliateFromItem(item)?.payout_method === 'stripe_connect');
+  if (stripeItem) {
+    return isStripeConnectReadyForItem(stripeItem) ? 'Stripe Connect ready' : 'Setup incomplete';
+  }
+
+  return 'Manual payout';
+};
+
+const matchesBatchSearch = (batch: any, query: string) => {
+  const payoutItems = Array.isArray(batch.payout_items) ? batch.payout_items : [];
+  const tokens = [
+    batch.id,
+    batch.status,
+    String(batch.total_amount_cents),
+    fmt(batch.total_amount_cents),
+    batch.notes,
+  ];
+
+  for (const item of payoutItems) {
+    const affiliate = getAffiliateFromItem(item);
+    tokens.push(
+      item.status,
+      String(item.amount_cents),
+      fmt(item.amount_cents),
+      item.payment_reference,
+      item.stripe_transfer_id,
+      item.stripe_transfer_status,
+      item.payout_failure_code,
+      item.payout_failure_message,
+      affiliate?.code,
+      affiliate?.contact_email,
+    );
+  }
+
+  const haystack = tokens.filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(query);
+};
+
+const batchMatchesFilter = (batch: any, filter: BatchFilter) => {
+  if (filter === 'all') return true;
+  const payoutItems = Array.isArray(batch.payout_items) ? batch.payout_items : [];
+
+  const hasFailed = payoutItems.some((item: any) =>
+    item.status === 'failed'
+    || item.payout_failure_code
+    || item.payout_failure_message
+    || item.stripe_transfer_status === 'failed'
+    || item.stripe_payout_status === 'failed'
+  );
+
+  const hasRetryable = payoutItems.some((item: any) =>
+    isRetryableStripeFailure(item)
+    && !item.stripe_transfer_id
+    && isStripeConnectReadyForItem(item)
+  );
+
+  const hasTransferred = payoutItems.some((item: any) =>
+    Boolean(item.stripe_transfer_id || item.stripe_payout_id)
+  );
+
+  const hasPaid = batch.status === 'paid' || payoutItems.some((item: any) => item.status === 'paid');
+
+  const hasManual = payoutItems.some((item: any) => {
+    const affiliate = getAffiliateFromItem(item);
+    return affiliate?.payout_method !== 'stripe_connect';
+  });
+
+  const hasStripeConnect = payoutItems.some((item: any) => {
+    const affiliate = getAffiliateFromItem(item);
+    return affiliate?.payout_method === 'stripe_connect';
+  });
+
+  if (filter === 'failed') return hasFailed;
+  if (filter === 'retryable') return hasRetryable;
+  if (filter === 'approved') return batch.status === 'approved';
+  if (filter === 'transferred') return hasTransferred;
+  if (filter === 'paid') return hasPaid;
+  if (filter === 'manual') return hasManual;
+  if (filter === 'stripe_connect') return hasStripeConnect;
+  return true;
+};
+
 const PayoutsAdmin: React.FC = () => {
   const [tab, setTab] = useState<PayoutsTab>('payable');
 
@@ -278,6 +431,15 @@ const PayoutsAdmin: React.FC = () => {
     }
   });
   const [expandedDiagnostics, setExpandedDiagnostics] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<BatchFilter>('all');
+
+  const filteredBatches = batches.filter(batch => {
+    const searchText = searchQuery.trim().toLowerCase();
+    if (activeFilter !== 'all' && !batchMatchesFilter(batch, activeFilter)) return false;
+    if (!searchText) return true;
+    return matchesBatchSearch(batch, searchText);
+  });
 
   useEffect(() => {
     try {
@@ -670,21 +832,71 @@ const PayoutsAdmin: React.FC = () => {
             </div>
           )}
 
+          <div className="mb-4 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-center">
+              <div>
+                <label htmlFor="batch-search" className="sr-only">Search payout batches</label>
+                <input
+                  id="batch-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search batches by affiliate, email, batch ID, status, transfer ID, or failure..."
+                  className="w-full rounded border border-nano-border bg-nano-dark px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-nano-yellow focus:outline-none"
+                />
+              </div>
+              {(searchQuery || activeFilter !== 'all') && (
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setActiveFilter('all');
+                  }}
+                  className="inline-flex items-center justify-center rounded border border-nano-border bg-black/50 px-3 py-2 text-xs uppercase tracking-widest text-nano-text hover:bg-white/5"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {BATCH_FILTERS.map(filter => (
+                <button
+                  key={filter.value}
+                  onClick={() => setActiveFilter(filter.value)}
+                  className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${
+                    activeFilter === filter.value
+                      ? 'border-nano-yellow bg-nano-yellow/10 text-nano-yellow'
+                      : 'border-nano-border bg-black/40 text-nano-text hover:bg-white/5'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {loadingBatches ? (
             <div className="space-y-2 animate-pulse">
               {[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-white/5 rounded" />)}
             </div>
           ) : (
             <div className="space-y-4">
-              {batches.length === 0 ? (
+              {filteredBatches.length === 0 ? (
                 <div className="bg-black border border-nano-border rounded-lg p-12 text-center">
                   <DollarSign size={32} className="text-gray-600 mx-auto mb-3" />
-                  <p className="text-gray-500 italic text-sm">No payout batches yet.</p>
-                  <p className="text-[10px] text-nano-text mt-1">Create a draft batch from payable affiliates to begin processing.</p>
+                  <p className="text-gray-500 italic text-sm">
+                    {batches.length === 0 ? 'No payout batches yet.' : 'No payout batches match your search.'}
+                  </p>
+                  <p className="text-[10px] text-nano-text mt-1">
+                    {batches.length === 0
+                      ? 'Create a draft batch from payable affiliates to begin processing.'
+                      : 'Try a different query or clear your filters.'}
+                  </p>
                 </div>
               ) : (
-                batches.map(batch => {
+                filteredBatches.map(batch => {
                   const payoutItems = Array.isArray(batch.payout_items) ? batch.payout_items : [];
+                  const batchAffiliate = getBatchAffiliateSummary(batch);
+                  const batchStatusSummary = getBatchStatusSummary(batch);
                   const isActing = batchActionId === batch.id;
                   const eligibleStripeItems = payoutItems.filter((item: any) => {
                     const affiliate = Array.isArray(item.affiliates) ? item.affiliates[0] : item.affiliates;
@@ -715,12 +927,17 @@ const PayoutsAdmin: React.FC = () => {
                         <div className="col-span-12 sm:col-span-3">
                           <div className="text-[10px] uppercase tracking-widest text-nano-text">Batch</div>
                           <div className="mt-1 font-mono text-sm text-white truncate" title={batch.id}>{batch.id.slice(0, 8)}...</div>
+                          <div className="mt-2 text-[10px] text-nano-text">
+                            <div className="font-bold text-white">{batchAffiliate.label}</div>
+                            <div className="truncate text-gray-500">{batchAffiliate.sub}</div>
+                          </div>
                         </div>
                         <div className="col-span-6 sm:col-span-2">
                           <div className="text-[10px] uppercase tracking-widest text-nano-text">Status</div>
                           <div className={`mt-1 inline-flex items-center rounded-full px-2 py-1 text-[10px] font-bold uppercase ${BATCH_STATUS_COLORS[batch.status] || ''}`}>
                             {batch.status}
                           </div>
+                          <div className="mt-2 text-[10px] text-nano-text">{batchStatusSummary}</div>
                         </div>
                         <div className="col-span-6 sm:col-span-2">
                           <div className="text-[10px] uppercase tracking-widest text-nano-text">Total</div>
