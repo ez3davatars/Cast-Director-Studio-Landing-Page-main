@@ -22,11 +22,10 @@ export default function Careers() {
           Careers
         </h1>
         <p className="text-lg text-slate-300 leading-relaxed max-w-3xl">
-          EZ3D Avatars created Cast Director Studio, its first creator tool
-          for AI avatar and character-focused visual production. Our focus is
-          helping creators make reusable AI actors, digital doubles, character
-          references, and production-ready visual assets with more control and
-          less prompt wrestling.
+          EZ3D Avatars created Cast Director Studio, a desktop-first creative
+          control layer for AI image generation. Our focus is helping creators
+          direct Gemini workflows, organize visual references, and produce
+          production-ready assets with more control and less prompt wrestling.
         </p>
       </div>
 

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Loader2, ArrowRight, UserPlus, LogIn, Mail } from 'lucide-react';
 import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
-import { useAuth } from '../App';
+import { useAuth } from '../lib/authContext';
 
 /**
  * GetStarted — Post-purchase onboarding page.

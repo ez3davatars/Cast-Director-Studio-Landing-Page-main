@@ -3,87 +3,81 @@ import ContentPageLayout from '../components/ContentPageLayout';
 const sections = [
   {
     title: 'What Is Cast Director Studio?',
-    content: `Cast Director Studio is a desktop AI creative tool designed for AI content creators, filmmakers, illustrators, and visual storytellers. It helps you create consistent AI characters faster by giving you directed creative controls instead of relying on prompt trial-and-error.
+    content: `Cast Director Studio is a desktop AI creative tool for creators who want more control over AI image generation. It acts as a creative control layer for Gemini and AI image generation, helping you direct lighting, wardrobe, props, scene context, references, and production outputs without relying only on long prompts.
 
-Rather than re-describing a character from scratch every time, you build reusable AI actors with guided controls for face references, subject lighting, wardrobe, props, and scenes — then generate consistent results across multiple visual styles.`,
+The goal is not to replace Gemini or future image models. The goal is to give creators a structured way to direct, organize, and manage those models more effectively.`,
   },
   {
     title: 'Who Is It For?',
-    content: `Cast Director Studio is built for creators who need repeatable, consistent AI-generated characters and scenes. This includes AI content creators, YouTubers, filmmakers, animators, brand designers, game concept artists, illustrators, and anyone working with AI-generated imagery in a production or creative workflow.
+    content: `Cast Director Studio is built for AI content creators, filmmakers, illustrators, brand designers, thumbnail creators, marketers, and visual storytellers who need faster creative iteration and better production organization.
 
-Whether you are building a cast of characters for a web series, designing product visuals with AI models, or creating concept art across multiple visual styles — Cast Director Studio is designed to help you move faster with more control.`,
+Use it for spokespeople, brand mascots, thumbnail characters, product models, digital doubles, storytelling characters, social media personalities, marketing visuals, and other AI-generated visual workflows.`,
   },
   {
     title: 'Core Workflow',
     content: `The typical Cast Director Studio workflow follows five steps:
 
-1. Add reference photos or start from scratch — define your character direction across five visual styles.
-2. Build a reusable AI actor with reference-guided identity capture.
-3. Direct subject lighting, wardrobe, props, and scene with guided creative controls.
-4. Generate cinematic variations with less prompt overhead.
-5. Export character sheets and consistency references — ready for production.
+1. Add references or start from scratch to define the visual direction for your project.
+2. Choose lighting, wardrobe, props, style, and scene direction through guided controls.
+3. Build visual anchors for people, clients, spokespeople, characters, or brand personalities.
+4. Generate variations through Gemini with less prompt overhead.
+5. Export production references and image assets for downstream creative workflows.
 
-This directed approach reduces the cycle of re-prompting, re-describing, and re-adjusting that slows down prompt-only workflows.`,
+This directed approach reduces the cycle of re-prompting, re-describing, and rebuilding ideas that slows down prompt-only workflows.`,
   },
   {
-    title: 'Reusable AI Actors',
-    content: `AI actors are your reusable character foundations. Instead of writing a detailed character prompt every time, you build a visual identity once and reuse it across generations.
+    title: 'Creative Foundations',
+    content: `Creative foundations are reusable project anchors for your visual work. Instead of starting every image from a blank prompt, you can organize references, style preferences, lighting direction, wardrobe choices, props, and scene context around the subject or concept you are building.
 
-Each AI actor stores face references, visual style preferences, and character direction — so you can generate new scenes, outfits, and compositions without losing the character's visual consistency.
-
-Your cast is not limited to people. You can build actors from humans, animals, mascots, stylized characters, anime characters, sci-fi characters, illustrated characters, and brand-driven digital subjects.`,
+These foundations can support many use cases, including spokespeople, brand personalities, product visuals, digital doubles, storytelling characters, and marketing campaigns.`,
   },
   {
-    title: 'Reference-Guided Photo Upload & Webcam Face Capture',
-    content: `Cast Director Studio supports two methods for creating stronger character references:
+    title: 'Reference-Guided Photo Upload & Webcam Capture',
+    content: `Cast Director Studio supports two methods for creating stronger visual anchors:
 
-Photo Upload: Upload source photos to create face and character references that guide the AI toward more consistent results.
+Photo Upload: Upload source photos to provide reference material that helps communicate the visual direction of a person, client, spokesperson, character, or brand personality.
 
-Webcam Face Capture: Use the guided webcam capture workflow to build face references directly from your webcam. This is designed for creators building digital doubles of themselves or collaborators.
+Webcam Capture: Use the guided webcam capture workflow to create reference inputs directly from your webcam for creative digital double and visual foundation workflows.
 
-Both methods create visual reference anchors — they are designed for creative character likeness workflows, not identity verification or surveillance. No biometric profiles are stored. The purpose is creative visual alignment for more repeatable AI-generated characters.`,
+Both methods create creative reference data. They are designed for visual direction, not identity verification, surveillance, face recognition, or guaranteed face cloning.`,
   },
   {
-    title: 'Production-Ready Subject Lighting',
-    content: `Subject lighting is one of the most common points of failure in AI image generation. A character may look great in one prompt, but changing the scene, wardrobe, or angle often breaks the lighting.
+    title: 'Production-Ready Lighting',
+    content: `Lighting is one of the most important parts of production-ready AI imagery. Cast Director Studio provides guided lighting direction so creators can communicate clean, readable subject lighting before generation.
 
-Cast Director Studio provides directed lighting controls designed to maintain clean, consistent illumination on the subject across different compositions and scenes. The goal is production-ready results that look intentional rather than randomly lit.`,
+AI output can still vary, but structured lighting direction helps creators spend less time rewriting prompts and more time evaluating usable results.`,
   },
   {
     title: 'Wardrobe, Props & Scene Direction',
-    content: `Instead of embedding wardrobe and prop descriptions into long prompts, Cast Director Studio provides guided controls for:
+    content: `Instead of burying every detail inside long prompt text, Cast Director Studio provides guided controls for:
 
-Wardrobe: Direct clothing, outfits, and accessories with visual references.
-Props: Add and position objects the character interacts with.
-Scenes: Control backgrounds, environments, and composition context.
+Wardrobe: Direct clothing, outfits, accessories, and styling.
+Props: Add object direction and production context.
+Scenes: Guide backgrounds, environments, camera mood, and composition context.
 
-These controls carry across visual styles — so you can switch between photorealistic, stylized cartoon, anime, illustration, and sci-fi directions without re-prompting wardrobe and scene details.`,
+These controls help creators communicate visual intent more efficiently across styles and iterations.`,
   },
   {
-    title: 'Character Sheets & Consistency References',
-    content: `Character sheets are structured visual outputs that capture a character's identity across multiple angles, expressions, and configurations.
+    title: 'Production References for Future Workflows',
+    content: `Production reference sheets are structured visual outputs for downstream work. They can include multi-angle references, expression maps, wardrobe sheets, style guides, lighting profiles, and other organized visual references.
 
-Use character sheets as reference inputs for downstream tools — video AI pipelines, animation workflows, illustration systems, or any generative tool that benefits from structured visual references.
-
-Character sheet outputs include multi-angle refs, expression maps, wardrobe sheets, style guides, and lighting profiles.`,
+Use them as reference inputs for video AI pipelines, animation workflows, illustration systems, branding systems, marketing content, or any generative workflow that benefits from structured visual references.`,
   },
   {
     title: 'Hosted Cloud vs. BYOK (Bring Your Own Key)',
     content: `Cast Director Studio supports two generation modes:
 
-Hosted Cloud: Generations consume credits from your plan. Prompts, configuration settings, and reference images are sent to the selected AI processing provider (such as Google Gemini) for generation. Generated output images may be temporarily hosted by Cast Director Studio for delivery and download, and are designed to auto-delete after 24 hours.
+Hosted Cloud: Generations consume credits from your plan. Prompts, configuration settings, and reference images are sent to the selected AI processing provider, such as Google Gemini, for generation. Generated output images may be temporarily hosted by Cast Director Studio for delivery and download.
 
-BYOK (Bring Your Own Key): Connect your own AI provider API key and run generations through your own account. You are responsible for your API key security and provider costs. BYOK mode may offer more flexibility for high-volume creators.
+BYOK (Bring Your Own Key): Connect your own Gemini API key and run generations through your own account. You are responsible for your API key security and provider costs.
 
-Both modes use the same creative controls and workflow — the difference is where the AI generation runs and how costs are handled.`,
+Both modes use the same application, creative controls, and workflow. The difference is how generation usage is billed and routed.`,
   },
   {
     title: 'AI Model Support & Future Providers',
-    content: `Cast Director Studio is designed as a provider-aware creative workflow. Image generation is handled by the selected AI processing provider, such as Google Gemini. The creative direction system — reusable AI actors, subject lighting, wardrobe, character sheets, and scene controls — is designed to work across model capabilities as they evolve.
+    content: `Cast Director Studio is designed as a provider-aware creative workflow. Image generation is handled by the selected AI processing provider, such as Google Gemini, while Cast Director Studio provides the creative direction layer around that generation process.
 
-As new model options become available, additional provider support may be evaluated where API access, quality, pricing, and product fit make sense. Model families such as Google Gemini / Nano Banana, OpenAI GPT Image, and xAI Grok Imagine may be evaluated as APIs, model capabilities, and creator needs evolve.
-
-Cast Director Studio does not guarantee support for every model or provider. Our focus is supporting the generators that best serve serious avatar, character, and AI content workflows.`,
+As new model options become available, additional provider support may be evaluated where API access, quality, pricing, and creator needs make sense. Cast Director Studio does not guarantee support for every model or provider.`,
   },
   {
     title: 'Credits & Generation Usage',
@@ -91,29 +85,23 @@ Cast Director Studio does not guarantee support for every model or provider. Our
 
 Generation Credits are pegged to render size:
 
-• Standard 1K Generation: 1 Credit
-• 2K Widescreen or Character Sheet: 2 Credits
-• Ultra-High 4K Generation: 6 Credits
+- Standard 1K Generation: 1 Credit
+- 2K Widescreen or Production Reference Sheet: 2 Credits
+- Ultra-High 4K Generation: 6 Credits
 
-The pricing page on the site lists current plan options and credit allocations.
-
-BYOK users do not consume Cast Director Studio credits — they use their own API key and are billed directly by their AI provider.`,
+BYOK users do not consume Cast Director Studio credits. They use their own API key and are billed directly by their AI provider.`,
   },
   {
-    title: 'Local Desktop Workflow',
-    content: `Cast Director Studio provides the creative workspace and direction system for building AI actors, references, character assets, and visual workflows.
+    title: 'Desktop-First Workflow',
+    content: `Cast Director Studio provides the creative workspace and direction system for projects, references, production sheets, and generated assets.
 
-When Hosted Cloud mode is used, generation requests are processed through the selected AI provider, such as Google Gemini. BYOK mode routes requests through your own AI provider API key. Account and license information may also sync with Cast Director Studio services.
-
-Completed generated outputs from Hosted Cloud mode may be temporarily delivered through Cast Director Studio and are designed to automatically delete after 24 hours.`,
+Projects, references, character sheets, and creative assets remain under your control while Gemini securely handles generation requests through its API. Account and license information may also sync with Cast Director Studio services.`,
   },
   {
-    title: 'Hosted Image Availability & 24-Hour Deletion',
-    content: `When using Hosted Cloud generation, generated output images are temporarily hosted by Cast Director Studio for delivery to your desktop client. This 24-hour temporary hosting and deletion applies only to generated output images — not to input or reference images, which are sent to the AI processing provider for generation and are not stored long-term by Cast Director Studio.
+    title: 'Hosted Image Availability',
+    content: `When using Hosted Cloud generation, generated output images may be temporarily hosted by Cast Director Studio for delivery to your desktop client. This temporary hosting applies to generated output images, not long-term project storage.
 
-Generated output images are designed for temporary access and automatic deletion after 24 hours. This means generated images should be downloaded and saved locally during your session.
-
-Cast Director Studio does not guarantee indefinite storage of hosted generation results. Always save important outputs to your local project.`,
+Always save important outputs to your local project.`,
   },
   {
     title: 'Troubleshooting Basics',
@@ -121,9 +109,9 @@ Cast Director Studio does not guarantee indefinite storage of hosted generation 
 
 Generation not starting: Check your internet connection and verify your license or credits are active in your account dashboard.
 
-Results look inconsistent: Make sure you have uploaded clear reference photos and selected the appropriate visual style.
+Results drift from your intent: Review your references, lighting direction, style settings, and scene controls before generating another variation.
 
-Download not completing: Hosted assets are available for 24 hours. If a download fails, try regenerating or contact support.
+Download not completing: Hosted assets may be temporary. If a download fails, try regenerating or contact support.
 
 BYOK errors: Verify your API key is valid and has sufficient balance with your provider.
 
@@ -136,19 +124,17 @@ For additional help, reach out to support@castdirectorstudio.com.`,
 export default function Documentation() {
   return (
     <ContentPageLayout title="Documentation">
-      {/* Page header */}
       <div className="mb-16">
         <div className="w-10 h-[3px] rounded-full bg-nano-yellow mb-4" />
         <h1 className="font-display text-4xl md:text-5xl font-bold text-white tracking-tight mb-6">
           Documentation
         </h1>
         <p className="text-lg text-slate-300 leading-relaxed max-w-3xl">
-          Everything you need to know about Cast Director Studio — how it works,
+          Everything you need to know about Cast Director Studio, how it works,
           what it does, and how to get the most out of your creative workflow.
         </p>
       </div>
 
-      {/* Table of contents */}
       <nav className="mb-16 p-6 rounded-2xl border border-white/[0.04] bg-white/[0.02]">
         <h2 className="font-display text-sm font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">
           On This Page
@@ -167,7 +153,6 @@ export default function Documentation() {
         </ul>
       </nav>
 
-      {/* Sections */}
       <div className="space-y-16">
         {sections.map((s) => (
           <section

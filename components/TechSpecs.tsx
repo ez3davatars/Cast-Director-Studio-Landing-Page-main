@@ -1,27 +1,35 @@
 const features = [
   {
-    title: 'Production-Ready Subject Lighting',
-    body: 'Lighting is not just about making an image look dramatic. For creators, the subject needs to be clear, readable, and reusable. Cast Director Studio helps guide generations toward clean subject lighting so actors, outfits, products, and characters can serve as stronger foundations for AI video, product showcases, clothing previews, thumbnails, character sheets, and other visual content.',
+    title: 'Guided Creative Controls',
+    body: 'Direct characters, wardrobe, lighting, props, and scenes through structured controls instead of complex prompts. Reduce prompt engineering overhead and move faster from creative intent to generated result.',
   },
   {
-    title: 'Directed Control Over Character Results',
-    body: 'Prompt-only tools leave creators guessing. Cast Director Studio turns complex AI prompting into practical creative controls — so creators get more direction over how characters and avatars look, feel, and present across photorealistic, stylized, and anime workflows.',
+    title: 'Production-Ready Lighting',
+    body: 'Guide generation toward clean, readable subject lighting. Subjects are clear and usable for AI video, product showcases, thumbnails, character references, and downstream production workflows.',
   },
   {
-    title: 'Guided Wardrobe & Styling',
-    body: 'Define wardrobe, accessories, and props with structured controls instead of open-ended prompts. The styling system helps maintain consistency across multiple generations and scenes — faster than re-describing outfits every time.',
+    title: 'Wardrobe & Styling Direction',
+    body: 'Define and maintain wardrobe, accessories, and props through structured controls. Keep styling connected across multiple generations without re-describing outfits every time.',
   },
   {
-    title: 'Avatar Scene Direction Preview',
-    body: 'Guide the creative context around your avatar before generation. Add background, camera, mood, and scene direction to help produce more intentional character images for portraits, digital doubles, character sheets, thumbnails, AI video-ready assets, and much more!',
+    title: 'Scene Direction & Environment Control',
+    body: 'Guide background, camera composition, mood, and scene context before generation. Produce more intentional visuals for portraits, digital doubles, character references, and production-ready assets.',
   },
   {
-    title: 'Less Prompt Wrestling',
-    body: 'Stop spending hours trying to prompt the same character back into existence. The directed workflow builds more quality logic in, so creators can move faster with guided controls instead of trial-and-error prompting.',
+    title: 'Visual Reference Workflows',
+    body: 'Build visual anchors from references, settings, and generated outputs. Give Gemini clearer creative direction without turning every revision into a prompt rewrite.',
   },
   {
-    title: 'Desktop-First Creator Control',
-    body: 'Work from a desktop-first creative environment built for avatar and character production. Create reusable AI actors, digital doubles, character references, wardrobe concepts, and production-ready visual assets with stronger privacy control — instead of relying on a crowded cloud platform to store every project, reference, and creative asset.',
+    title: 'Desktop Asset Ownership',
+    body: 'Work from a local desktop environment built for production workflows. Keep projects, references, character sheets, and creative assets under your control.',
+  },
+  {
+    title: 'Production Reference Sheets',
+    body: 'Export structured visual references for future workflows, including video generation, animation, storytelling, branding, marketing, and other downstream creative systems.',
+  },
+  {
+    title: 'Secure Gemini Integration',
+    body: "Use Google's latest image generation models through a creator workflow designed for direction, organization, and faster iteration.",
   },
 ];
 
@@ -41,10 +49,10 @@ export default function TechSpecs() {
 
       <div className="mx-auto max-w-6xl relative z-10" ref={revealRef}>
         <h2 className="font-display text-3xl font-bold tracking-tight text-white md:text-[44px] leading-tight" data-reveal="up">
-          What Makes Cast Director Studio Different
+          Built For Creative Direction, Not Just Image Generation
         </h2>
         <p className="mt-6 max-w-3xl text-[17px] leading-relaxed text-slate-300" data-reveal="up">
-          Six flagship capabilities designed for AI creators who need faster, more directed control over characters, subject lighting, and scenes.
+          Most AI tools generate images. Cast Director Studio helps direct them. The platform combines guided controls, visual references, structured workflows, and production tools into a unified environment designed specifically for creators.
         </p>
 
         <div className="mt-12 grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 auto-rows-[minmax(200px,auto)]">

@@ -105,22 +105,22 @@ export default function Hero() {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 rounded-full border border-nano-yellow/30 bg-nano-yellow/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-nano-yellow backdrop-blur-sm shadow-[0_0_20px_rgba(250,204,21,0.15)]">
             <span className="h-1.5 w-1.5 rounded-full bg-nano-yellow animate-pulse" />
-            Fast Creative Control for AI Production
+            Creative Direction for Gemini and AI Models
           </div>
 
           {/* Headline */}
           <h1 className="mx-auto mt-8 w-full max-w-[820px] font-display text-[38px] sm:text-5xl md:text-6xl lg:text-[76px] font-extrabold tracking-tight text-white leading-[1.1] md:leading-[1.05]">
             <span className="block mb-1" style={{ textShadow: '0 2px 40px rgba(0,0,0,0.8), 0 0 80px rgba(250,204,21,0.12)' }}>
-              Create Consistent AI Characters Faster.
+              The Creative Control Layer
             </span>
             <span className="block pb-1 bg-gradient-to-r from-nano-yellow via-[#FDE68A] to-[#FEF3C7] bg-clip-text text-transparent">
-              With Director-Level Control.
+              for Gemini and AI Image Generation.
             </span>
           </h1>
 
           {/* Paragraph */}
           <p className="mx-auto mt-8 max-w-[600px] text-[16px] leading-[1.8] text-slate-300 md:text-[18px]" style={{ textShadow: '0 2px 20px rgba(0,0,0,0.9)' }}>
-            Cast Director Studio helps AI creators make consistent, production-ready visual assets faster — with reusable actors, clean subject lighting, wardrobe and props direction, character sheets, and scene control.
+            Turn ideas into production-ready visuals faster with guided creative controls for characters, lighting, wardrobe, props, scene direction, and digital doubles. Stop wrestling with prompts. Start directing results.
           </p>
 
           {/* CTA Buttons */}
@@ -135,7 +135,7 @@ export default function Hero() {
 
           {/* Sub-CTA tagline */}
           <p className="mx-auto mt-5 max-w-[560px] text-[13px] leading-relaxed text-slate-400 tracking-wide">
-            Built for creators who need consistent characters, production-ready subject lighting, and faster production workflows.
+            Built for creators who need guided creative direction, faster iteration, and production-ready asset control.
           </p>
 
           {/* Feature Rail — Premium Director Control Rail */}
@@ -158,8 +158,8 @@ export default function Hero() {
                       </svg>
                     </div>
                     <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Reusable Actors</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Create once. Direct across multiple shots.</div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Guided Creative Control</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Direct characters, wardrobe, lighting, props, and scenes without writing complex prompts.</div>
                     </div>
                   </div>
                 </div>
@@ -175,8 +175,8 @@ export default function Hero() {
                       </svg>
                     </div>
                     <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Studio Lighting</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Clean, readable subjects for image and video workflows.</div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Faster Production Workflows</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Spend less time rebuilding ideas and more time creating usable assets.</div>
                     </div>
                   </div>
                 </div>
@@ -192,8 +192,8 @@ export default function Hero() {
                       </svg>
                     </div>
                     <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Wardrobe + Props</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Guide outfits, accessories, objects, and environments.</div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Desktop-First Asset Ownership</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Keep projects, references, character sheets, and creative assets under your control.</div>
                     </div>
                   </div>
                 </div>
@@ -209,8 +209,8 @@ export default function Hero() {
                       </svg>
                     </div>
                     <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Desktop-First Control</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Keep tighter control over references and creative assets.</div>
+                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Powered By Gemini</div>
+                      <div className="text-[13px] leading-relaxed text-slate-400">Leverage Google's latest image generation models through workflows built for creators.</div>
                     </div>
                   </div>
                 </div>

@@ -136,10 +136,10 @@ export default function ShowcaseCarousel() {
               Made With Cast Director Studio
             </h2>
             <p className="mt-6 text-[16px] md:text-[17px] leading-relaxed text-slate-300 max-w-2xl mx-auto">
-              Explore sample AI actors, digital doubles, character portraits, wardrobe concepts,
-              and production-ready avatar visuals created with Cast Director Studio. These examples
-              show how creators can build visually compelling, reusable characters for AI video,
-              storytelling, thumbnails, branding, and content creation.
+              Explore sample digital doubles, character portraits, wardrobe concepts,
+              product-style visuals, and production-ready assets created with Cast Director Studio.
+              These examples show how creators can direct AI image generation for video,
+              storytelling, thumbnails, branding, marketing, and content creation.
             </p>
           </div>
 
@@ -287,8 +287,8 @@ export default function ShowcaseCarousel() {
             </h2>
             <p className="mt-5 text-[15px] md:text-[16px] leading-relaxed text-slate-300 max-w-2xl mx-auto">
               In observed BYOK testing with Nano Banana 2, Cast Director Studio produced
-              high-quality character generations fast enough for real creative iteration —
-              helping creators test looks, lighting, wardrobe, and character direction
+              high-quality generations fast enough for real creative iteration,
+              helping creators test looks, lighting, wardrobe, and scene direction
               without waiting all day between results.
             </p>
           </div>

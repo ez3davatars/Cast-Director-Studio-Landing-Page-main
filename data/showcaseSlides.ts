@@ -10,19 +10,19 @@ export interface ShowcaseSlide {
 export const showcaseSlides: ShowcaseSlide[] = [
   {
     id: 'cinematic-ai-actor',
-    title: 'Cinematic AI Actor',
-    caption: 'Reusable character portrait with clean subject lighting and high facial detail.',
-    tags: ['Digital Actor', 'AI Video-Ready', 'Character Creation'],
+    title: 'Cinematic Spokesperson',
+    caption: 'Directed portrait with clean subject lighting and high facial detail.',
+    tags: ['Spokesperson', 'AI Video-Ready', 'Creative Direction'],
     image: '/showcase/cinematic-ai-actor.webp',
-    alt: 'Cinematic AI actor portrait created with Cast Director Studio, showing clean subject lighting and realistic facial detail.',
+    alt: 'Cinematic spokesperson portrait created with Cast Director Studio, showing clean subject lighting and realistic facial detail.',
   },
   {
     id: 'digital-double-portrait',
     title: 'Digital Double Portrait',
-    caption: 'Face-focused character reference designed for stronger visual consistency across creative workflows.',
-    tags: ['Digital Double', 'Facial Detail', 'Character Reference'],
+    caption: 'Reference-guided portrait designed as a stronger visual anchor for creative workflows.',
+    tags: ['Digital Double', 'Facial Detail', 'Visual Reference'],
     image: '/showcase/digital-double-portrait.webp',
-    alt: 'Digital double style portrait created with Cast Director Studio for consistent character creation and avatar workflows.',
+    alt: 'Digital double style portrait created with Cast Director Studio for creator reference and avatar workflows.',
   },
   {
     id: 'stylized-character-design',
@@ -35,10 +35,10 @@ export const showcaseSlides: ShowcaseSlide[] = [
   {
     id: 'wardrobe-concept-visual',
     title: 'Wardrobe Concept Visual',
-    caption: 'Character styling and outfit direction for brand-ready visual assets and avatar workflows.',
-    tags: ['Wardrobe Direction', 'Character Styling', 'Brand Visuals'],
+    caption: 'Styling and outfit direction for brand-ready visual assets and creator workflows.',
+    tags: ['Wardrobe Direction', 'Styling Direction', 'Brand Visuals'],
     image: '/showcase/wardrobe-concept-visual.webp',
-    alt: 'Wardrobe concept image created with Cast Director Studio showing outfit direction for a reusable AI actor.',
+    alt: 'Wardrobe concept image created with Cast Director Studio showing outfit and styling direction.',
   },
   {
     id: 'production-ready-portrait',
@@ -51,10 +51,10 @@ export const showcaseSlides: ShowcaseSlide[] = [
   {
     id: 'character-sheet-sample',
     title: 'Character Sheet Sample',
-    caption: 'Structured visual reference for consistent identity across future generations and scenes.',
-    tags: ['Character Sheet', 'Visual Consistency', 'Reusable Actor'],
+    caption: 'Structured visual reference for future AI, animation, storytelling, and marketing workflows.',
+    tags: ['Reference Sheet', 'Production Asset', 'Future Workflows'],
     image: '/showcase/character-sheet-sample.webp',
-    alt: 'Character sheet created with Cast Director Studio to support consistent character identity across multiple outputs.',
+    alt: 'Reference sheet created with Cast Director Studio to support downstream creative workflows.',
   },
   {
     id: 'creator-thumbnail-character',

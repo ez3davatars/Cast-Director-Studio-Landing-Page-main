@@ -9,9 +9,9 @@ These terms apply to all users of the App, including desktop application users, 
   },
   {
     title: '2. Product Description',
-    content: `Cast Director Studio is a desktop AI creative tool that helps users create reusable AI actors, direct subject lighting, control wardrobe and props, compose scenes, and generate character sheets and AI-generated images.
+    content: `Cast Director Studio is a desktop AI creative tool that helps users direct Gemini and AI image generation workflows, control lighting, guide wardrobe and props, compose scenes, organize visual references, and generate production reference sheets and AI-generated images.
 
-The App provides guided creative controls designed to reduce prompt trial-and-error and improve character consistency across generated outputs.`,
+The App provides guided creative controls designed to reduce prompt trial-and-error, support faster iteration, and help creators move ideas toward production-ready visual assets.`,
   },
   {
     title: '3. Account & License Access',
@@ -79,12 +79,12 @@ You are responsible for downloading and saving generated output assets during yo
     title: '12. No Guarantee of Outputs',
     content: `AI-generated outputs are inherently variable. Cast Director Studio does not guarantee:
 
-• Perfect character consistency across all generations
+• Perfect visual continuity across all generations
 • Exact likeness reproduction from reference images
 • Copyright clearance or legal usability of generated content
 • Fitness for any specific commercial or legal purpose
 
-The App provides directed controls designed to improve consistency and quality, but results depend on many factors including input quality, prompt direction, and AI model behavior.`,
+The App provides directed controls designed to reduce creative friction and improve workflow quality, but results depend on many factors including input quality, prompt direction, settings, and AI model behavior.`,
   },
   {
     title: '13. AI Output Limitations',

@@ -56,7 +56,7 @@ const Footer: React.FC = () => {
                 <ul className="space-y-4 text-slate-400 font-medium">
                     <li><Link to="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>
                     <li><Link to="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
-                    <li><Link to="/face-reference" className="hover:text-white transition-colors">Face Reference &amp; Biometric Data</Link></li>
+                    <li><Link to="/face-reference" className="hover:text-white transition-colors">Reference &amp; Biometric Data</Link></li>
                 </ul>
             </div>
             <div>

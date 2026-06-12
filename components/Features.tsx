@@ -31,23 +31,23 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ title, description, icon, del
 const Features: React.FC = () => {
   const features = [
     {
-      title: "Wardrobe Prompt Studio",
-      description: "Define custom clothing assets that stick. Generate infinite costume variations without losing the actor's identity or body consistency.",
+      title: "Wardrobe & Styling Direction",
+      description: "Define clothing, accessories, styling, and product presentation through guided controls instead of long prompt rewrites.",
       icon: <Shirt />
     },
     {
       title: "Prop & Object Control",
-      description: "Ensure narrative continuity. Generate specific props (watches, weapons, tools) that persist across different generated scenes.",
+      description: "Add object direction and production context so Gemini has clearer creative intent before generation.",
       icon: <Box />
     },
     {
       title: "Scene Composer",
-      description: "Streamlined staging control. Place your identity-locked characters into complex environments using advanced masking and prompt weighing.",
+      description: "Guide background, camera, mood, and environment choices before you generate production visuals.",
       icon: <Layers />
     },
     {
       title: "Video AI Optimized",
-      description: "The perfect starting point for motion. Export high-res, consistent character plates ready for Runway Gen-3, Pika, and Sora.",
+      description: "Export high-resolution production references for AI video, animation, marketing, and downstream creative workflows.",
       icon: <Clapperboard />
     }
   ];
@@ -56,10 +56,10 @@ const Features: React.FC = () => {
     <section id="features" className="py-24 bg-nano-dark relative">
       <div className="container mx-auto px-6">
         <div className="text-center mb-20">
-            <h2 className="text-3xl md:text-5xl font-bold mb-6">COMPLETE PROMPT CONTROL</h2>
+            <h2 className="text-3xl md:text-5xl font-bold mb-6">GUIDED CREATIVE CONTROL</h2>
             <p className="text-gray-400 max-w-2xl mx-auto">
-                Stop rolling the dice on random generations. 
-                Our studio gives you the controls to direct every pixel before you hit generate.
+                Stop relying on prompt rewrites alone.
+                Cast Director Studio gives creators guided controls for visual direction before generation.
             </p>
         </div>
 

@@ -51,7 +51,7 @@ export default function Community() {
         <p className="text-lg text-slate-300 leading-relaxed max-w-3xl">
           Cast Director Studio is built for creators. Our community channels are
           being set up to give you places to share results, learn new workflows,
-          and connect with other creators using directed AI character tools.
+          and connect with other creators using directed AI generation tools.
         </p>
       </div>
 

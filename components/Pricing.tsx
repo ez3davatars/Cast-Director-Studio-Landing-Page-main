@@ -394,14 +394,14 @@ const Pricing: React.FC<PricingProps> = ({
           <div className="absolute inset-0 surface-noise opacity-30 pointer-events-none" />
           
           <h2 className="font-display text-3xl font-bold tracking-tight text-white md:text-[40px] leading-tight mb-8 relative z-10">
-            One Local Desktop App.<br className="hidden md:block" /> Two Ways to Power Generation.
+            Use Your Own Gemini API Key Or Let Us Handle It
           </h2>
           <div className="max-w-2xl mx-auto space-y-5 relative z-10">
             <p className="text-[16px] leading-relaxed text-slate-300 font-medium">
-              Cast Director Studio is always a local desktop app with the same core tools and workflow. Users can either connect their own Gemini API key or use EZ3D Avatars' credit-based access.
+              Cast Director Studio gives every creator the same professional workflow and creative tools. Bring your own Gemini API key for direct usage pricing, or use EZ3D Avatars credits for a simpler managed experience.
             </p>
             <p className="text-[16px] leading-relaxed text-slate-300">
-              Some packages include credits upfront, and additional credits can be purchased as needed. The difference is in usage and billing, not in feature access.
+              Same application. Same creative controls. Same workflow. Choose the generation option that works best for you.
             </p>
           </div>
         </div>

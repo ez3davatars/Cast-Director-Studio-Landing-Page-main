@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
-import { useAuth } from '../App';
+import { useAuth } from '../lib/authContext';
 
 const ResetPassword = () => {
     const navigate = useNavigate();

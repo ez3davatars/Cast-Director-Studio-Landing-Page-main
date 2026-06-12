@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, createContext, useContext } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { Routes, Route, useLocation, useNavigate, Navigate, Outlet } from 'react-router-dom';
 import Navbar from './components/Navbar';
@@ -10,6 +10,7 @@ import CharacterSheets from './components/CharacterSheets';
 import TechSpecs from './components/TechSpecs';
 import ShowcaseCarousel from './components/ShowcaseCarousel';
 import Pricing from './components/Pricing';
+import PrivacyAssurance from './components/PrivacyAssurance';
 import FaqSection from './components/FaqSection';
 import Footer from './components/Footer';
 import AuthModal from './components/AuthModal';
@@ -52,21 +53,7 @@ import Contact from './pages/Contact';
 import ResetPassword from './pages/ResetPassword';
 import ScrollToTop from './components/ScrollToTop';
 import { supabase } from './lib/supabase';
-
-// ---------- Auth Context ----------
-// Exposes session + auth modal triggers to any descendant (e.g. ContentPageLayout)
-// without prop-drilling through every content page.
-interface AuthContextValue {
-  session: Session | null;
-  openCreateAccount: () => void;
-  openSignIn: () => void;
-}
-export const AuthContext = createContext<AuthContextValue>({
-  session: null,
-  openCreateAccount: () => {},
-  openSignIn: () => {},
-});
-export const useAuth = () => useContext(AuthContext);
+import { AuthContext } from './lib/authContext';
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -156,6 +143,7 @@ function App() {
         <ShowcaseCarousel />
         <DigitalDoubles />
         <Workflow />
+        <PrivacyAssurance />
         <CharacterSheets />
         <TechSpecs />
         <Pricing session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />

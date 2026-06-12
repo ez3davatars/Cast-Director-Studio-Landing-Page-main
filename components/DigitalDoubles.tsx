@@ -18,29 +18,32 @@ export default function DigitalDoubles() {
             <div className="flex flex-col gap-3 mb-6">
               <div className="w-10 h-[3px] rounded-full bg-blue-500/60" />
               <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-400">
-                Reference-Guided Character Pipeline
+                Reference-Guided Production Workflow
               </span>
             </div>
 
             <h2 className="font-display text-3xl font-bold tracking-tight text-white md:text-[44px] leading-[1.1]">
-              Reference-Guided Photo Upload & Webcam Face Capture for High-Quality Digital Doubles
+              Build Better Visual Foundations
             </h2>
 
             <div className="mt-6 space-y-4 text-[16px] leading-relaxed text-slate-300">
               <p>
-                Cast Director Studio includes reference-guided photo upload and webcam face capture workflows for building stronger character identity foundations. Creators can upload source photos or capture a guided face reference to help create high-quality digital doubles and character likenesses with stronger facial alignment and visual consistency.
+                Cast Director Studio includes reference-guided photo upload and webcam face capture workflows to help establish stronger visual foundations for your creative direction.
               </p>
               <p>
-                This is not identity verification or guaranteed face cloning — it is a creative reference workflow that gives the AI a stronger visual anchor, so creators spend less time trying to prompt the same face back into existence.
+                Upload source photos or use guided webcam capture to create richer visual anchors for yourself, clients, spokespeople, characters, and brand personalities. This stronger foundation helps reduce iteration time when generating variations.
+              </p>
+              <p>
+                This is a creative reference workflow designed to strengthen visual direction and reduce iteration time, not identity verification or guaranteed face cloning.
               </p>
             </div>
 
             {/* Compact value indicators */}
             <div className="mt-8 space-y-3">
               {[
-                { title: 'Photo Upload & Webcam Capture', desc: 'Use source photos or guided webcam capture to create stronger face and character references for creative production.' },
-                { title: 'Stronger Identity Retention', desc: 'Reference-guided capture creates a richer visual anchor for more repeatable character likeness across generations and scenes.' },
-                { title: 'Creative Reference Workflow', desc: 'Designed for digital doubles, character likenesses, and visual consistency — not identity verification or guaranteed face cloning.' },
+                { title: 'Photo Upload & Webcam Capture', desc: 'Establish visual foundations with source photos or guided reference capture for stronger creative anchors.' },
+                { title: 'Stronger Visual Anchors', desc: 'Reference-guided workflows create richer visual anchors that help reduce iteration and rebuild time.' },
+                { title: 'Creative Reference Workflow', desc: 'Designed for faster creative direction — better visual foundations mean faster production iterations.' },
               ].map((item) => (
                 <div key={item.title} className="flex items-start gap-3">
                   <div className="mt-1.5 w-2 h-2 rounded-full bg-blue-500/60 shrink-0 shadow-[0_0_6px_rgba(59,130,246,0.3)]" />

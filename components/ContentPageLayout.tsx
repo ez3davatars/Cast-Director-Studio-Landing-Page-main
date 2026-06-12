@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import Navbar from './Navbar';
 import Footer from './Footer';
-import { useAuth } from '../App';
+import { useAuth } from '../lib/authContext';
 
 interface ContentPageLayoutProps {
   title: string;

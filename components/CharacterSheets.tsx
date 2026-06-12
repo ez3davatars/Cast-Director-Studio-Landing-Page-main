@@ -16,16 +16,16 @@ export default function CharacterSheets() {
           <div className="flex flex-col gap-3 mb-6">
             <div className="w-10 h-[3px] rounded-full bg-purple-500/60" />
             <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-purple-400">
-              Downstream Generative Tools
+              Production-Ready Assets
             </span>
           </div>
 
           <h2 className="font-display text-3xl font-bold tracking-tight text-white md:text-[44px] leading-[1.1]">
-            Character Sheets for Stronger Generative Consistency
+            Production References for Future Workflows
           </h2>
 
           <p className="mt-5 text-[16px] leading-relaxed text-slate-300 max-w-[560px]">
-            Generate character sheets and consistency references that help authors, comic creators, AI filmmakers, and brand storytellers keep visual identity stable across future generations — without re-prompting from scratch every session.
+            Generate structured reference sheets that serve as production assets for downstream workflows. Character sheets, expression maps, wardrobe guides, and visual references help carry creative intent into video generation, animation, storytelling, branding, and other production tools.
           </p>
         </div>
 
@@ -55,7 +55,7 @@ export default function CharacterSheets() {
                 Structured Reference Outputs
               </h3>
               <p className="mt-4 text-[16px] leading-relaxed text-slate-300 max-w-xl">
-                Generate multi-angle character reference sheets, expression maps, and styling guides that capture your character's visual identity in a structured format. These sheets work as visual prompts for other generative tools, video AI pipelines, and production workflows.
+                Generate multi-angle reference sheets, expression maps, and styling guides that capture your creative direction in a structured format. These sheets work as visual prompts for other generative tools, video AI pipelines, and production workflows.
               </p>
 
               <div className="mt-6 flex flex-wrap gap-2">
@@ -73,7 +73,7 @@ export default function CharacterSheets() {
             <div className="p-7">
               <h3 className="text-lg font-semibold text-white">Stronger Visual Anchoring</h3>
               <p className="mt-3 text-[14px] leading-relaxed text-slate-300">
-                Character sheets give generative workflows a structured reference point. Instead of re-describing characters from memory, downstream tools can reference visual outputs that capture lighting, expression, wardrobe, and identity traits — reducing repetitive prompt work.
+                Character sheets give generative workflows a structured reference point. Instead of rebuilding direction from memory, downstream tools can reference visual outputs that capture lighting, expression, wardrobe, and styling traits, reducing repetitive prompt work.
               </p>
             </div>
           </div>

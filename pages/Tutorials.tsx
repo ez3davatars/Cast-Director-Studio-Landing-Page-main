@@ -3,44 +3,44 @@ import ContentPageLayout from '../components/ContentPageLayout';
 
 const tutorials = [
   {
-    title: 'Create Your First Reusable AI Actor',
+    title: 'Build Your First Creative Foundation',
     description:
-      'Learn how to build a reusable AI actor from scratch or from reference photos, set visual style direction, and save your first character to your cast library.',
+      'Learn how to start from references or a blank project, set visual style direction, and organize the creative controls for your first generation workflow.',
   },
   {
-    title: 'Use Photo Upload or Webcam Face Capture',
+    title: 'Use Photo Upload or Webcam Capture',
     description:
-      'Walk through the reference-guided photo upload and webcam face capture workflows to create stronger character references for visual consistency.',
+      'Walk through reference-guided photo upload and webcam capture workflows to create stronger visual anchors for yourself, clients, spokespeople, characters, or brand personalities.',
   },
   {
-    title: 'Build a Character Sheet',
+    title: 'Build a Production Reference Sheet',
     description:
-      'Generate multi-angle character reference sheets, expression maps, and style guides — ready for downstream AI tools and production workflows.',
+      'Generate multi-angle references, expression maps, wardrobe guides, and style sheets for downstream AI tools and production workflows.',
   },
   {
-    title: 'Create Clean Subject Lighting for AI Video',
+    title: 'Direct Production-Ready Lighting',
     description:
-      'Use Cast Director Studio\'s directed lighting controls to produce production-ready subject illumination that stays consistent across compositions.',
+      "Use Cast Director Studio's guided lighting controls to communicate cleaner subject lighting before generation.",
   },
   {
     title: 'Showcase Clothing, Wardrobe, or Products',
     description:
-      'Direct wardrobe, accessories, and props on your AI actors. Learn how to maintain outfit consistency across scenes and visual styles.',
+      'Direct wardrobe, accessories, styling, props, and product presentation through structured creative controls.',
   },
   {
-    title: 'Create Consistent Characters Across Styles',
+    title: 'Explore Multiple Visual Styles',
     description:
-      'Switch between photorealistic, stylized cartoon, anime, illustration, and sci-fi directions while keeping your character visually anchored.',
+      'Switch between photorealistic, stylized cartoon, anime, illustration, and sci-fi directions while keeping your references and creative settings organized.',
   },
   {
     title: 'Prepare Images for AI Video Workflows',
     description:
-      'Export character assets and consistency references formatted for AI video tools, animation pipelines, and other downstream generative systems.',
+      'Export production assets and visual references formatted for AI video tools, animation pipelines, and other downstream generative systems.',
   },
   {
     title: 'Use BYOK Mode',
     description:
-      'Connect your own AI provider API key, configure BYOK settings, and run generations through your own account for maximum flexibility.',
+      'Connect your own Gemini API key, configure BYOK settings, and run generations through your own account for direct usage pricing.',
   },
 ];
 
@@ -55,7 +55,7 @@ export default function Tutorials() {
         <p className="text-lg text-slate-300 leading-relaxed max-w-3xl">
           Cast Director Studio includes a built-in step-by-step user guide
           right inside the app to help you get started quickly. This page will
-          be the home for upcoming video tutorials — covering workflows,
+          be the home for upcoming video tutorials covering workflows,
           creative techniques, and feature deep-dives as they are released.
         </p>
       </div>
