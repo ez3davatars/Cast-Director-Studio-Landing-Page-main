@@ -1,23 +1,23 @@
 const features = [
   {
-    title: 'Guided Creative Controls',
-    body: 'Direct characters, wardrobe, lighting, props, and scenes through structured controls instead of complex prompts. Reduce prompt engineering overhead and move faster from creative intent to generated result.',
+    title: 'Built-In Prompt Intelligence',
+    body: 'Make creative selections through structured controls while Cast Director Studio turns those choices into clearer Gemini-ready instructions behind the scenes.',
   },
   {
-    title: 'Production-Ready Lighting',
-    body: 'Guide generation toward clean, readable subject lighting. Subjects are clear and usable for AI video, product showcases, thumbnails, character references, and downstream production workflows.',
+    title: 'Professional Lighting Without Lighting Expertise',
+    body: 'Good lighting can dramatically improve the quality of AI-generated content. Cast Director Studio includes carefully designed lighting options that help guide Gemini toward cleaner, more production-ready results.',
   },
   {
-    title: 'Wardrobe & Styling Direction',
-    body: 'Define and maintain wardrobe, accessories, and props through structured controls. Keep styling connected across multiple generations without re-describing outfits every time.',
+    title: 'Styling Direction Without Rewriting Prompts',
+    body: 'Changing outfits, accessories, and styling details usually requires prompt adjustments. Guided wardrobe and styling options help creators explore visual directions without rebuilding prompts from scratch.',
   },
   {
     title: 'Scene Direction & Environment Control',
-    body: 'Guide background, camera composition, mood, and scene context before generation. Produce more intentional visuals for portraits, digital doubles, character references, and production-ready assets.',
+    body: 'Guide background, camera composition, mood, and scene context before generation. Produce more intentional visuals for portraits, marketing assets, digital doubles, and production-ready scenes.',
   },
   {
     title: 'Visual Reference Workflows',
-    body: 'Build visual anchors from references, settings, and generated outputs. Give Gemini clearer creative direction without turning every revision into a prompt rewrite.',
+    body: 'Build visual anchors from references, settings, and generated outputs. Give Gemini stronger visual context without turning every revision into a prompt rewrite.',
   },
   {
     title: 'Desktop Asset Ownership',
@@ -49,10 +49,10 @@ export default function TechSpecs() {
 
       <div className="mx-auto max-w-6xl relative z-10" ref={revealRef}>
         <h2 className="font-display text-3xl font-bold tracking-tight text-white md:text-[44px] leading-tight" data-reveal="up">
-          Built For Creative Direction, Not Just Image Generation
+          Production Controls for Better Gemini Visuals
         </h2>
         <p className="mt-6 max-w-3xl text-[17px] leading-relaxed text-slate-300" data-reveal="up">
-          Most AI tools generate images. Cast Director Studio helps direct them. The platform combines guided controls, visual references, structured workflows, and production tools into a unified environment designed specifically for creators.
+          Cast Director Studio combines guided controls, visual references, structured workflows, and production tools into a desktop-first environment for creators who want better image results with less prompt experimentation.
         </p>
 
         <div className="mt-12 grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 auto-rows-[minmax(200px,auto)]">

@@ -770,7 +770,7 @@ const LeadsAdmin: React.FC = () => {
                       {isRegistered ? (
                         <button
                           onClick={() => {
-                            const targetEmail = contact?.email || selected.sender_email;
+                            const targetEmail = contact?.email || selected.messages.find((msg) => msg.direction === 'inbound')?.sender_email || selected.messages.find((msg) => msg.sender_email)?.sender_email;
                             if (targetEmail) navigate(`/admin/customers/${targetEmail}`);
                           }}
                           className="text-[10px] uppercase font-bold text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"

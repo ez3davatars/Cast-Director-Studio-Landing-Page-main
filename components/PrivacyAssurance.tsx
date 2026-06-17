@@ -2,21 +2,24 @@ import { useScrollReveal } from '../hooks/useScrollReveal';
 
 const ownershipPoints = [
   {
-    title: 'Desktop-First Workflow',
-    desc: 'Work from a local creator environment built for production workflows.',
+    title: 'Desktop-First Creative Environment',
+    desc: 'Projects, references, character sheets, and creative assets stay organized under your control.',
   },
   {
-    title: 'Local Project Storage',
-    desc: 'Keep projects, references, character sheets, and creative assets organized on your device.',
+    title: 'Secure Gemini Requests',
+    desc: 'Gemini securely handles generation requests through its API based on the mode you choose.',
   },
   {
-    title: 'Client-Friendly Asset Management',
-    desc: 'Manage client references, brand visuals, and production outputs in one controlled workspace.',
+    title: 'Organized Returned Outputs',
+    desc: 'Bring generated assets back into a local project library designed for production workflows.',
   },
-  {
-    title: 'Secure Gemini Generation',
-    desc: "Generation requests are handled securely through Google's API.",
-  },
+];
+
+const localFlow = [
+  'Your Device',
+  'Secure Gemini Request',
+  'Returned Output',
+  'Local Project Library',
 ];
 
 export default function PrivacyAssurance() {
@@ -35,7 +38,7 @@ export default function PrivacyAssurance() {
               Your Projects. Your Assets. Your Control.
             </h2>
             <p className="mt-6 text-[17px] leading-relaxed text-slate-300">
-              Projects, references, character sheets, and creative assets remain under your control while Gemini securely handles generation requests through its API.
+              Cast Director Studio is built as a desktop-first creative environment. Projects, references, character sheets, and creative assets remain organized under your control, while Gemini securely handles generation requests through its API.
             </p>
 
             <div className="mt-10 space-y-4">
@@ -54,30 +57,29 @@ export default function PrivacyAssurance() {
           </div>
 
           <div data-reveal="up" className="flex items-center justify-center">
-            <div className="w-full max-w-[400px] p-8 rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.04] to-white/[0.02] backdrop-blur-sm shadow-[0_8px_32px_-8px_rgba(0,0,0,0.4)]">
-              <div className="space-y-6">
-                <div className="w-12 h-12 rounded-xl bg-nano-yellow/20 border border-nano-yellow/40 flex items-center justify-center">
-                  <svg className="w-6 h-6 text-nano-yellow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
+            <div className="w-full max-w-[460px] p-6 rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.04] to-white/[0.02] backdrop-blur-sm shadow-[0_8px_32px_-8px_rgba(0,0,0,0.4)]">
+              <div className="space-y-4">
+                {localFlow.map((step, index) => (
+                  <div key={step} className="relative flex items-center gap-4 rounded-[20px] border border-white/10 bg-black/25 p-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-nano-yellow/20 bg-nano-yellow/10 text-[12px] font-bold text-nano-yellow">
+                      {String(index + 1).padStart(2, '0')}
+                    </div>
+                    <p className="text-[15px] font-semibold text-white">{step}</p>
+                    {index < localFlow.length - 1 && (
+                      <div className="absolute -bottom-4 left-9 h-4 w-px bg-gradient-to-b from-nano-yellow/40 to-transparent" />
+                    )}
+                  </div>
+                ))}
+              </div>
 
+              <div className="mt-6 grid grid-cols-2 gap-4 pt-5 border-t border-white/[0.06]">
                 <div>
-                  <h3 className="text-[18px] font-display font-bold text-white mb-3">Organized Creative Control</h3>
-                  <p className="text-[14px] leading-relaxed text-slate-300">
-                    Keep your references, settings, and generated assets connected to the project they belong to, so your creative workflow stays organized from idea to delivery.
-                  </p>
+                  <p className="text-xs text-slate-400 uppercase tracking-wide">Workflow</p>
+                  <p className="text-lg font-bold text-white mt-1">Desktop</p>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-2 border-t border-white/[0.06]">
-                  <div>
-                    <p className="text-xs text-slate-400 uppercase tracking-wide">Workflow</p>
-                    <p className="text-lg font-bold text-white mt-1">Desktop</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 uppercase tracking-wide">Generation</p>
-                    <p className="text-lg font-bold text-white mt-1">Gemini API</p>
-                  </div>
+                <div>
+                  <p className="text-xs text-slate-400 uppercase tracking-wide">Generation</p>
+                  <p className="text-lg font-bold text-white mt-1">Gemini API</p>
                 </div>
               </div>
             </div>

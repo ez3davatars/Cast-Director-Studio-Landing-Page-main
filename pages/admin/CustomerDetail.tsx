@@ -256,14 +256,29 @@ const CustomerDetailAdmin: React.FC = () => {
       const warnings: string[] = [];
 
       try {
-        // 1. Fetch Contact Core (Fail-soft required)
-        let contactQuery = supabase.from('contacts').select('id, email, created_at, user_id');
+        // 1. Fetch Contact Core. crm_contacts is the current CRM source of truth;
+        // legacy contacts remains a fallback for old deep links.
+        let contactQuery = supabase.from('crm_contacts').select('id, email, name, company, created_at, user_id');
         if (id?.includes('@')) {
           contactQuery = contactQuery.eq('email', id);
         } else {
           contactQuery = contactQuery.eq('id', id);
         }
-        const { data: contactData, error: contactErr } = await contactQuery.single();
+        let { data: contactData, error: contactErr } = await contactQuery.single();
+
+        if (contactErr) {
+          let legacyQuery = supabase.from('contacts').select('id, email, created_at, user_id');
+          if (id?.includes('@')) {
+            legacyQuery = legacyQuery.eq('email', id);
+          } else {
+            legacyQuery = legacyQuery.eq('id', id);
+          }
+          const legacy = await legacyQuery.single();
+          contactData = legacy.data
+            ? { ...legacy.data, name: null, company: null }
+            : null;
+          contactErr = legacy.error;
+        }
 
         if (contactErr) throw contactErr;
         
@@ -273,7 +288,7 @@ const CustomerDetailAdmin: React.FC = () => {
           const { data: stripeData, error: stripeErr } = await supabase
              .from('contacts')
              .select('stripe_customer_id')
-             .eq('id', contactData.id)
+             .eq('email', contactData.email)
              .single();
           if (!stripeErr && stripeData) stripeCustomerId = stripeData.stripe_customer_id;
         } catch (e) {

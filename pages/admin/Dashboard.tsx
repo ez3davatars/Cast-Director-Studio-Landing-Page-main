@@ -131,123 +131,24 @@ const AdminDashboard: React.FC = () => {
     setError(null);
 
     try {
-      const now = new Date();
-      const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      const last30Iso = last30Days.toISOString();
-
-      const [
-        totalOrdersRes,
-        recentOrdersCountRes,
-        totalRevenueRes,
-        recentRevenueRes,
-        activeSubscriptionsRes,
-        licensesRes,
-        downloadsRes,
-        paymentWarningsRes,
-        contactsRes,
-        openLeadsRes,
-        recentEmailsRes,
-        totalAffiliatesRes,
-        activeAffiliatesRes,
-        pendingAffiliatesRes,
-        suspendedAffiliatesRes,
-        pendingAppsRes,
-        clicksRes,
-        referralsRes,
-        ledgerRes,
-        paidItemsRes,
-        pendingBatchesRes,
-        failedPayoutItemsRes,
-        latestWebhookRes,
-        failedWebhooksRes,
-        recentWebhookRes,
-        recentOrdersRes,
-        recentApplicationsRes,
-        recentBatchesRes,
-      ] = await Promise.all([
-        supabase.from('orders').select('id', { count: 'exact', head: true }),
-        supabase.from('orders').select('id', { count: 'exact', head: true }).gte('created_at', last30Iso),
-        supabase.from('orders').select('sum(total_amount)'),
-        supabase.from('orders').select('sum(total_amount)').gte('created_at', last30Iso),
-        supabase.from('subscriptions').select('id', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('licenses').select('id', { count: 'exact', head: true }),
-        supabase.from('downloads').select('id', { count: 'exact', head: true }),
-        supabase.from('orders').select('id', { count: 'exact', head: true }).or('payment_status.ne.paid,fulfillment_status.ne.fulfilled'),
-        supabase.from('contacts').select('id', { count: 'exact', head: true }),
-        supabase.from('crm_conversations').select('id', { count: 'exact', head: true }).not('status', 'in', '(resolved,closed)'),
-        supabase.from('email_sends').select('id', { count: 'exact', head: true }).gte('created_at', last30Iso),
-        supabase.from('affiliates').select('id', { count: 'exact', head: true }),
-        supabase.from('affiliates').select('id', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('affiliates').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('affiliates').select('id', { count: 'exact', head: true }).eq('status', 'suspended'),
-        supabase.from('affiliate_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('affiliate_clicks').select('id', { count: 'exact', head: true }),
-        supabase.from('referrals').select('id', { count: 'exact', head: true }),
-        supabase
-          .from('commission_ledger')
-          .select('type, amount_cents, hold_until, payout_batch_id')
-          .is('payout_batch_id', null),
-        supabase.from('payout_items').select('amount_cents').eq('status', 'paid'),
-        supabase.from('payout_batches').select('id', { count: 'exact', head: true }).eq('status', 'approved'),
-        supabase.from('payout_items').select('id', { count: 'exact', head: true }).eq('status', 'failed'),
-        supabase.from('stripe_webhooks').select('created_at').order('created_at', { ascending: false }).limit(1),
-        supabase.from('stripe_webhooks').select('id', { count: 'exact', head: true }).eq('processing_status', 'failed'),
-        supabase.from('stripe_webhooks').select('id, event_type, processing_status, created_at').order('created_at', { ascending: false }).limit(3),
-        supabase.from('orders').select('id, order_number, total_amount, payment_status, created_at').order('created_at', { ascending: false }).limit(3),
-        supabase.from('affiliate_applications').select('id, email, status, created_at').order('created_at', { ascending: false }).limit(3),
-        supabase.from('payout_batches').select('id, status, total_amount_cents, created_at').order('created_at', { ascending: false }).limit(3),
-      ]);
-
-      const nowIso = now.toISOString();
-
-      if (ledgerRes.error) throw ledgerRes.error;
-      if (paidItemsRes.error) throw paidItemsRes.error;
-
-      const ledgerRows = ledgerRes.data || [];
-      let commissionsInHoldCents = 0;
-      let payableCommissionsCents = 0;
-
-      for (const row of ledgerRows) {
-        const signedAmount = row.type === 'earned' ? row.amount_cents : -row.amount_cents;
-        if (row.hold_until && row.hold_until > nowIso) {
-          commissionsInHoldCents += signedAmount;
-        } else {
-          payableCommissionsCents += signedAmount;
-        }
-      }
+      const { data, error: rpcErr } = await supabase.rpc('admin_get_operations_summary');
+      if (rpcErr) throw rpcErr;
+      const summary = (data || {}) as Partial<DashboardMetrics> & {
+        recentOrdersList?: RecentOrder[];
+        recentApplications?: RecentApplication[];
+        recentBatches?: RecentBatch[];
+        recentWebhookEvents?: RecentWebhookEvent[];
+      };
 
       setMetrics({
-        totalRevenue: Array.isArray(totalRevenueRes.data) && totalRevenueRes.data[0]?.sum ? Number(totalRevenueRes.data[0].sum) : null,
-        recentRevenue: Array.isArray(recentRevenueRes.data) && recentRevenueRes.data[0]?.sum ? Number(recentRevenueRes.data[0].sum) : null,
-        totalOrders: totalOrdersRes.count ?? null,
-        recentOrders: recentOrdersCountRes.count ?? null,
-        activeSubscriptions: activeSubscriptionsRes.count ?? null,
-        totalLicenses: licensesRes.count ?? null,
-        totalDownloads: downloadsRes.count ?? null,
-        paymentWarnings: paymentWarningsRes.count ?? null,
-        customers: contactsRes.count ?? null,
-        openContactLeads: openLeadsRes.count ?? null,
-        recentEmails: recentEmailsRes.count ?? null,
-        pendingApplications: pendingAppsRes.count ?? null,
-        totalAffiliates: totalAffiliatesRes.count ?? null,
-        activeAffiliates: activeAffiliatesRes.count ?? null,
-        pendingAffiliates: pendingAffiliatesRes.count ?? null,
-        suspendedAffiliates: suspendedAffiliatesRes.count ?? null,
-        totalClicks: clicksRes.count ?? null,
-        totalReferrals: referralsRes.count ?? null,
-        commissionsInHoldCents: Math.max(0, commissionsInHoldCents),
-        payableCommissionsCents: Math.max(0, payableCommissionsCents),
-        paidCommissionsCents: (paidItemsRes.data || []).reduce((sum, row) => sum + (row.amount_cents || 0), 0),
-        pendingPayoutBatches: pendingBatchesRes.count ?? null,
-        failedPayoutItems: failedPayoutItemsRes.count ?? null,
-        latestWebhookAt: latestWebhookRes.data?.[0]?.created_at ?? null,
-        failedWebhooks: failedWebhooksRes.count ?? null,
+        ...emptyMetrics,
+        ...summary,
       });
 
-      setRecentOrders((recentOrdersRes.data || []) as RecentOrder[]);
-      setRecentApplications((recentApplicationsRes.data || []) as RecentApplication[]);
-      setRecentBatches((recentBatchesRes.data || []) as RecentBatch[]);
-      setRecentWebhookEvents((recentWebhookRes.data || []) as RecentWebhookEvent[]);
+      setRecentOrders(summary.recentOrdersList || []);
+      setRecentApplications(summary.recentApplications || []);
+      setRecentBatches(summary.recentBatches || []);
+      setRecentWebhookEvents(summary.recentWebhookEvents || []);
     } catch (err: any) {
       console.warn('Dashboard metrics load failed:', err);
       setError(err.message || 'Failed to load operations dashboard metrics.');
@@ -279,11 +180,11 @@ const AdminDashboard: React.FC = () => {
 
   const summaryCards = [
     { label: 'Revenue (30d)', value: fmtMoney(metrics.recentRevenue), icon: <Banknote size={18} className="text-nano-yellow" /> },
-    { label: 'Orders', value: fmtCount(metrics.totalOrders), icon: <ShoppingBag size={18} className="text-nano-yellow" /> },
+    { label: 'Orders', value: fmtCount(metrics.totalOrders), icon: <ShoppingBag size={18} className="text-nano-yellow" />, href: '/admin/orders' },
     { label: 'Active Subscriptions', value: fmtCount(metrics.activeSubscriptions), icon: <Package size={18} className="text-nano-yellow" /> },
-    { label: 'Customers', value: fmtCount(metrics.customers), icon: <Users size={18} className="text-nano-yellow" /> },
-    { label: 'Open Contact Leads', value: fmtCount(metrics.openContactLeads), icon: <Mail size={18} className="text-nano-yellow" /> },
-    { label: 'Failed Webhooks', value: fmtCount(metrics.failedWebhooks), icon: <Activity size={18} className="text-nano-yellow" /> },
+    { label: 'Customers', value: fmtCount(metrics.customers), icon: <Users size={18} className="text-nano-yellow" />, href: '/admin/customers' },
+    { label: 'Open Contact Leads', value: fmtCount(metrics.openContactLeads), icon: <Mail size={18} className="text-nano-yellow" />, href: '/admin/leads' },
+    { label: 'Failed Webhooks', value: fmtCount(metrics.failedWebhooks), icon: <Activity size={18} className="text-nano-yellow" />, href: '/admin/webhooks?filter=failed' },
   ];
 
   const affiliateCards = [
@@ -291,14 +192,14 @@ const AdminDashboard: React.FC = () => {
     { label: 'Active Affiliates', value: fmtCount(metrics.activeAffiliates) },
     { label: 'Pending Affiliates', value: fmtCount(metrics.pendingAffiliates) },
     { label: 'Suspended Affiliates', value: fmtCount(metrics.suspendedAffiliates) },
-    { label: 'Pending Applications', value: fmtCount(metrics.pendingApplications) },
+    { label: 'Pending Applications', value: fmtCount(metrics.pendingApplications), href: '/admin/affiliate-applications' },
     { label: 'Total Affiliate Clicks', value: fmtCount(metrics.totalClicks) },
     { label: 'Conversions / Referrals', value: fmtCount(metrics.totalReferrals) },
-    { label: 'Commissions In Hold', value: fmtMoney(metrics.commissionsInHoldCents) },
-    { label: 'Payable Commissions', value: fmtMoney(metrics.payableCommissionsCents) },
-    { label: 'Paid Commissions', value: fmtMoney(metrics.paidCommissionsCents) },
-    { label: 'Pending Payout Batches', value: fmtCount(metrics.pendingPayoutBatches) },
-    { label: 'Failed Payout Items', value: fmtCount(metrics.failedPayoutItems) },
+    { label: 'Commissions In Hold', value: fmtMoney(metrics.commissionsInHoldCents == null ? null : metrics.commissionsInHoldCents / 100) },
+    { label: 'Payable Commissions', value: fmtMoney(metrics.payableCommissionsCents == null ? null : metrics.payableCommissionsCents / 100) },
+    { label: 'Paid Commissions', value: fmtMoney(metrics.paidCommissionsCents == null ? null : metrics.paidCommissionsCents / 100) },
+    { label: 'Pending Payout Batches', value: fmtCount(metrics.pendingPayoutBatches), href: '/admin/payouts' },
+    { label: 'Failed Payout Items', value: fmtCount(metrics.failedPayoutItems), href: '/admin/payouts' },
   ];
 
   const commerceCards = [
@@ -307,7 +208,7 @@ const AdminDashboard: React.FC = () => {
     { label: 'Active Subscriptions', value: fmtCount(metrics.activeSubscriptions), icon: <Package size={18} /> },
     { label: 'Active Licenses', value: fmtCount(metrics.totalLicenses), icon: <FileText size={18} /> },
     { label: 'Downloads', value: fmtCount(metrics.totalDownloads), icon: <Download size={18} /> },
-    { label: 'Payment / Fulfillment Warnings', value: fmtCount(metrics.paymentWarnings), icon: <AlertTriangle size={18} /> },
+    { label: 'Payment / Fulfillment Warnings', value: fmtCount(metrics.paymentWarnings), icon: <AlertTriangle size={18} />, href: '/admin/orders?status=warnings' },
   ];
 
   return (
@@ -322,15 +223,18 @@ const AdminDashboard: React.FC = () => {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-3">
-        {summaryCards.map((card) => (
-          <div key={card.label} className={cardClass}>
+        {summaryCards.map((card) => {
+          const CardTag: any = card.href ? Link : 'div';
+          return (
+          <CardTag key={card.label} {...(card.href ? { to: card.href } : {})} className={`${cardClass} ${card.href ? 'block transition-colors hover:border-nano-yellow/40 hover:bg-white/[0.03]' : ''}`}>
             <div className="flex items-center justify-between mb-3">
               <div className="text-xs uppercase tracking-widest text-nano-text font-bold">{card.label}</div>
               {card.icon}
             </div>
             <div className="text-3xl font-bold font-mono text-white">{card.value}</div>
-          </div>
-        ))}
+          </CardTag>
+          );
+        })}
       </section>
 
       <section className={cardClass}>
@@ -361,15 +265,18 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="grid gap-3 lg:grid-cols-3">
-          {commerceCards.map((card) => (
-            <div key={card.label} className="bg-black/80 rounded-xl p-4 border border-nano-border">
+          {commerceCards.map((card) => {
+            const CardTag: any = card.href ? Link : 'div';
+            return (
+            <CardTag key={card.label} {...(card.href ? { to: card.href } : {})} className={`bg-black/80 rounded-xl p-4 border border-nano-border ${card.href ? 'transition-colors hover:border-nano-yellow/40 hover:bg-white/[0.03]' : ''}`}>
               <div className="flex items-center justify-between mb-3 text-xs uppercase tracking-widest text-nano-text font-bold">
                 <span>{card.label}</span>
                 {card.icon}
               </div>
               <div className="text-2xl font-bold font-mono text-white">{card.value}</div>
-            </div>
-          ))}
+            </CardTag>
+            );
+          })}
         </div>
       </section>
 
@@ -442,12 +349,15 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="grid gap-3 xl:grid-cols-4">
-          {affiliateCards.map((card) => (
-            <div key={card.label} className="bg-black/80 rounded-xl p-4 border border-nano-border">
+          {affiliateCards.map((card) => {
+            const CardTag: any = card.href ? Link : 'div';
+            return (
+            <CardTag key={card.label} {...(card.href ? { to: card.href } : {})} className={`bg-black/80 rounded-xl p-4 border border-nano-border ${card.href ? 'transition-colors hover:border-nano-yellow/40 hover:bg-white/[0.03]' : ''}`}>
               <div className="text-xs uppercase tracking-widest text-nano-text font-bold mb-3">{card.label}</div>
               <div className="text-2xl font-bold font-mono text-white">{card.value}</div>
-            </div>
-          ))}
+            </CardTag>
+            );
+          })}
         </div>
       </section>
 

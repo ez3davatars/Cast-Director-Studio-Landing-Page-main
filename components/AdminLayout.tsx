@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -20,6 +20,7 @@ import {
   FileText,
   ChevronDown,
 } from 'lucide-react';
+import { AdminFeedbackProvider } from './AdminFeedback';
 
 interface AdminLayoutProps {
   session: Session;
@@ -145,6 +146,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
     });
   };
 
+  const activeItem = navGroups
+    .flatMap(group => group.items)
+    .find(item => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`));
+  const pageTitle = location.pathname === '/admin' ? 'Operations Overview' : activeItem?.name || 'Admin Operations';
+
   return (
     <div className="flex h-screen bg-nano-dark text-white overflow-hidden">
       {/* Sidebar Navigation */}
@@ -242,14 +248,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ session }) => {
       <main className="flex-1 flex flex-col h-full bg-nano-dark overflow-y-auto">
         <header className="h-20 border-b border-nano-border flex items-center justify-between px-8 flex-shrink-0 bg-black/50 backdrop-blur-md sticky top-0 z-10">
           <h1 className="text-xl font-bold font-sans tracking-wide">
-            Operations Dashboard
+            {pageTitle}
           </h1>
           <div className="text-xs text-nano-text bg-black px-3 py-1 rounded border border-nano-border">
             {session.user.email} (Admin)
           </div>
         </header>
         <div className="p-8">
-          <Outlet />
+          <AdminFeedbackProvider>
+            <Outlet />
+          </AdminFeedbackProvider>
         </div>
       </main>
     </div>

@@ -32,7 +32,7 @@ const Navbar: React.FC<NavbarProps> = ({
 
   const navLinks = [
     { name: 'Workflow', href: '/#workflow' },
-    { name: 'Production Pipeline', href: '/#pipeline' },
+    { name: 'Creative Pipeline', href: '/#pipeline' },
     { name: 'View Pricing', href: '/#pricing' },
   ];
 

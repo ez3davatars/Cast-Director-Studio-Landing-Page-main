@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AdminSearchFilter from '../../components/AdminSearchFilter';
+import { useAdminFeedback } from '../../components/AdminFeedback';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Loader2, X, ChevronRight, UserPlus } from 'lucide-react';
 
@@ -34,6 +35,7 @@ type StatusFilter = typeof TABS[number]['key'];
 
 const AffiliatesAdmin: React.FC = () => {
   const navigate = useNavigate();
+  const { notify } = useAdminFeedback();
 
   // List state
   const [data, setData]         = useState<any[]>([]);
@@ -108,8 +110,12 @@ const AffiliatesAdmin: React.FC = () => {
       .from('affiliates')
       .update({ status: newStatus })
       .eq('id', id);
-    if (updateErr) { alert(`Status update failed: ${updateErr.message}`); return; }
+    if (updateErr) {
+      notify(`Status update failed: ${updateErr.message}`, 'error');
+      return;
+    }
     setData(prev => prev.map(a => a.id === id ? { ...a, status: newStatus } : a));
+    notify(`Affiliate status updated to ${newStatus}.`, 'success');
   };
 
   const handleCreate = async () => {
@@ -146,6 +152,7 @@ const AffiliatesAdmin: React.FC = () => {
       setIsCreateOpen(false);
       setCreateEmail(''); setCreateCode(''); setCreateRate('0.30'); setCreateDuration('12');
       fetchData();
+      notify('Affiliate created.', 'success');
     } catch (err: any) {
       setCreateError(err.message);
     } finally {

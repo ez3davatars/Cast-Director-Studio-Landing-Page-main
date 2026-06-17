@@ -5,20 +5,7 @@ import AdminSearchFilter from '../../components/AdminSearchFilter';
 import { useNavigate } from 'react-router-dom';
 
 const InboxAdmin: React.FC = () => {
-  if (import.meta.env.VITE_INBOUND_EMAIL_ENABLED !== 'true') {
-      return (
-         <div className="flex h-full items-center justify-center p-8">
-            <div className="text-center bg-black/40 border border-nano-border p-12 rounded-lg flex flex-col items-center">
-                <InboxIcon size={48} className="text-gray-600 mb-6" />
-                <h3 className="text-xl font-bold font-mono text-white mb-2 tracking-wide">Support Inbox Disabled</h3>
-                <p className="text-gray-400 text-sm max-w-md font-sans">
-                   The inbound customer email module is currently disabled. All core operations remain fully structurally independent. Enable <code className="bg-white/10 px-1 py-0.5 rounded text-nano-yellow font-mono text-xs">VITE_INBOUND_EMAIL_ENABLED=true</code> to mount this route.
-                </p>
-            </div>
-         </div>
-      );
-  }
-
+  const inboundEnabled = import.meta.env.VITE_INBOUND_EMAIL_ENABLED === 'true';
   const [emails, setEmails] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,8 +50,23 @@ const InboxAdmin: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!inboundEnabled) return;
     fetchEmails();
-  }, []);
+  }, [inboundEnabled]);
+
+  if (!inboundEnabled) {
+      return (
+         <div className="flex h-full items-center justify-center p-8">
+            <div className="text-center bg-black/40 border border-nano-border p-12 rounded-lg flex flex-col items-center">
+                <InboxIcon size={48} className="text-gray-600 mb-6" />
+                <h3 className="text-xl font-bold font-mono text-white mb-2 tracking-wide">Support Inbox Disabled</h3>
+                <p className="text-gray-400 text-sm max-w-md font-sans">
+                   The inbound customer email module is currently disabled. All core operations remain fully structurally independent. Enable <code className="bg-white/10 px-1 py-0.5 rounded text-nano-yellow font-mono text-xs">VITE_INBOUND_EMAIL_ENABLED=true</code> to mount this route.
+                </p>
+            </div>
+         </div>
+      );
+  }
 
   const filteredEmails = emails.filter((e) => {
     if (!filterText) return true;

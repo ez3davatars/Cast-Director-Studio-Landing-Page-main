@@ -4,8 +4,10 @@ import { Routes, Route, useLocation, useNavigate, Navigate, Outlet } from 'react
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import LaunchAdvantage from './components/LaunchAdvantage';
+import GeminiComparison from './components/GeminiComparison';
 import DigitalDoubles from './components/DigitalDoubles';
 import Workflow from './components/Workflow';
+import AiVideoFoundations from './components/AiVideoFoundations';
 import CharacterSheets from './components/CharacterSheets';
 import TechSpecs from './components/TechSpecs';
 import ShowcaseCarousel from './components/ShowcaseCarousel';
@@ -140,10 +142,12 @@ function App() {
         <Navbar session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />
         <Hero />
         <LaunchAdvantage />
+        <GeminiComparison />
         <ShowcaseCarousel />
         <DigitalDoubles />
         <Workflow />
         <PrivacyAssurance />
+        <AiVideoFoundations />
         <CharacterSheets />
         <TechSpecs />
         <Pricing session={session} onCreateAccount={openCreateAccount} onSignIn={openSignIn} />

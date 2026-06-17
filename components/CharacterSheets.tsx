@@ -25,7 +25,7 @@ export default function CharacterSheets() {
           </h2>
 
           <p className="mt-5 text-[16px] leading-relaxed text-slate-300 max-w-[560px]">
-            Generate structured reference sheets that serve as production assets for downstream workflows. Character sheets, expression maps, wardrobe guides, and visual references help carry creative intent into video generation, animation, storytelling, branding, and other production tools.
+            Generate structured visual references that can support future AI image tools, video generation platforms, animation workflows, comics, storytelling projects, branding, and marketing content.
           </p>
         </div>
 
@@ -55,7 +55,7 @@ export default function CharacterSheets() {
                 Structured Reference Outputs
               </h3>
               <p className="mt-4 text-[16px] leading-relaxed text-slate-300 max-w-xl">
-                Generate multi-angle reference sheets, expression maps, and styling guides that capture your creative direction in a structured format. These sheets work as visual prompts for other generative tools, video AI pipelines, and production workflows.
+                Instead of rebuilding visual ideas from scratch, create reference assets that help future generations stay aligned with your creative direction.
               </p>
 
               <div className="mt-6 flex flex-wrap gap-2">
@@ -73,7 +73,7 @@ export default function CharacterSheets() {
             <div className="p-7">
               <h3 className="text-lg font-semibold text-white">Stronger Visual Anchoring</h3>
               <p className="mt-3 text-[14px] leading-relaxed text-slate-300">
-                Character sheets give generative workflows a structured reference point. Instead of rebuilding direction from memory, downstream tools can reference visual outputs that capture lighting, expression, wardrobe, and styling traits, reducing repetitive prompt work.
+                Structured sheets give generative workflows a stronger reference point. Downstream tools can reference visual outputs that capture lighting, expression, wardrobe, and styling traits, reducing repetitive prompt work.
               </p>
             </div>
           </div>
@@ -83,7 +83,7 @@ export default function CharacterSheets() {
             <div className="p-7">
               <h3 className="text-lg font-semibold text-white">Built for Downstream Workflows</h3>
               <p className="mt-3 text-[14px] leading-relaxed text-slate-300">
-                Character sheets are designed as production-ready reference assets. Use them as input for video AI tools, animation pipelines, illustration workflows, or any generative system that benefits from structured visual references — and move faster across tools.
+                Use reference sheets as source material for video AI tools, animation pipelines, illustration workflows, comics, branding, marketing, or any generative system that benefits from clearer visual references.
               </p>
             </div>
           </div>

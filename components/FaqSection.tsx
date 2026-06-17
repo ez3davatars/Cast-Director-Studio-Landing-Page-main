@@ -4,7 +4,7 @@ import { useScrollReveal } from '../hooks/useScrollReveal';
 const faqItems = [
   {
     q: 'What makes Cast Director Studio different from a regular AI image generator?',
-    a: 'Most AI image generators create images from prompts. Cast Director Studio helps creators direct the process with guided controls for lighting, wardrobe, props, scenes, visual references, and production-ready outputs, all from a desktop-first creative workflow.',
+    a: 'Most AI image generators start with a prompt box. Cast Director Studio helps creators make guided creative selections for lighting, wardrobe, props, scenes, visual references, and production outputs while the app translates those choices into clearer Gemini-ready instructions.',
   },
   {
     q: 'What is reference-guided photo upload?',
@@ -23,7 +23,7 @@ const faqItems = [
     a: 'The main advantage is faster creative direction. Instead of relying only on long prompt rewrites, creators can guide lighting, wardrobe, props, references, and scenes through structured controls that reduce friction and help move ideas toward usable assets.',
   },
   {
-    q: 'Does Cast Director Studio guarantee perfect consistency?',
+    q: 'Does Cast Director Studio remove all AI iteration?',
     a: 'No. AI generation can still vary between outputs. Cast Director Studio is designed to reduce prompt iteration, strengthen visual references, and make creative intent easier to communicate, not eliminate all model drift.',
   },
   {

@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { supabase, invokeAuthenticatedFunction } from '../../lib/supabase';
 import AdminSearchFilter from '../../components/AdminSearchFilter';
-import { useNavigate } from 'react-router-dom';
+import AdminPagination from '../../components/AdminPagination';
+import { useAdminFeedback } from '../../components/AdminFeedback';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ExternalLink, Mail, Loader2 } from 'lucide-react';
+
+const PAGE_SIZE = 25;
 
 const OrdersAdmin: React.FC = () => {
   const [data, setData] = useState<any[]>([]);
@@ -12,10 +16,29 @@ const OrdersAdmin: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [total, setTotal] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { notify } = useAdminFeedback();
   
   const [resendingState, setResendingState] = useState<{ [key: string]: boolean }>({});
   const navigate = useNavigate();
+  const page = Math.max(1, Number(searchParams.get('page') || '1'));
+  const search = searchParams.get('q') || '';
+  const statusFilter = searchParams.get('status') || 'all';
+
+  const updateParam = (key: string, value: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (value && value !== 'all') params.set(key, value);
+    else params.delete(key);
+    params.set('page', '1');
+    setSearchParams(params);
+  };
+
+  const setPage = (next: number) => {
+    const params = new URLSearchParams(searchParams);
+    params.set('page', String(Math.max(1, next)));
+    setSearchParams(params);
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -23,14 +46,32 @@ const OrdersAdmin: React.FC = () => {
       setError(null);
       try {
         // 1. Fetch Orders (Fail-soft safe explicit columns)
-        const { data: ords, error: fetchErr } = await supabase
+        const from = (page - 1) * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        let orderQuery = supabase
           .from('orders')
-          .select('id, created_at, order_number, customer_email, total_amount, payment_status, fulfillment_status, fulfilled_at')
+          .select('id, created_at, order_number, customer_email, total_amount, payment_status, fulfillment_status, fulfilled_at', { count: 'exact' })
           .order('created_at', { ascending: false })
-          .limit(100);
+          .range(from, to);
+
+        if (statusFilter === 'warnings') {
+          orderQuery = orderQuery.or('payment_status.neq.paid,fulfillment_status.neq.fulfilled');
+        } else if (statusFilter === 'paid') {
+          orderQuery = orderQuery.eq('payment_status', 'paid');
+        } else if (statusFilter === 'unpaid') {
+          orderQuery = orderQuery.neq('payment_status', 'paid');
+        }
+
+        if (search.trim()) {
+          const q = `%${search.trim()}%`;
+          orderQuery = orderQuery.or(`order_number.ilike.${q},customer_email.ilike.${q}`);
+        }
+
+        const { data: ords, error: fetchErr, count } = await orderQuery;
 
         if (fetchErr) throw fetchErr;
         const validOrders = ords || [];
+        setTotal(count || 0);
 
         // 2. Extract Relational IDs
         const orderIds = validOrders.map((o: any) => o.id);
@@ -39,8 +80,12 @@ const OrdersAdmin: React.FC = () => {
         // 3. Parallelized Safe Lookups
         const [prodsRes, itemsRes, contactsRes] = await Promise.allSettled([
           supabase.from('products').select('id, name, sku'),
-          supabase.from('order_items').select('order_id, product_id').in('order_id', orderIds),
-          supabase.from('contacts').select('id, email').in('email', emails)
+          orderIds.length > 0
+            ? supabase.from('order_items').select('order_id, product_id').in('order_id', orderIds)
+            : Promise.resolve({ data: [], error: null }),
+          emails.length > 0
+            ? supabase.from('crm_contacts').select('id, email').in('email', emails)
+            : Promise.resolve({ data: [], error: null })
         ]);
 
         // 4. Map Products safely
@@ -71,7 +116,7 @@ const OrdersAdmin: React.FC = () => {
     };
 
     fetchData();
-  }, []);
+  }, [page, search, statusFilter]);
 
   const getProductContext = (orderId: string) => {
      const item = itemsData.find(i => i.order_id === orderId);
@@ -83,7 +128,7 @@ const OrdersAdmin: React.FC = () => {
   const handleTransactionalResend = async (orderId: string, customerEmail: string) => {
     const contactId = contactsMap.get(customerEmail);
     if (!contactId) {
-        alert("Cannot resend natively: No matched Contact ID found for this email block.");
+        notify("Cannot resend receipt: no matched CRM contact was found for this email.", 'error');
         return;
     }
 
@@ -97,23 +142,30 @@ const OrdersAdmin: React.FC = () => {
       });
       if (invokeErr) throw new Error(invokeErr.message);
       if (data?.error) throw new Error(data.error);
-      alert("Receipt dispatched successfully.");
+      notify("Receipt dispatched successfully.", 'success');
     } catch (e: any) {
-      alert(`Resend Failed: ${e.message}`);
+      notify(`Resend failed: ${e.message}`, 'error');
     } finally {
       setResendingState(prev => ({...prev, [orderId]: false}));
     }
   };
 
-  const filtered = data.filter(d => 
-    JSON.stringify(d).toLowerCase().includes(search.toLowerCase()) || 
-    JSON.stringify(getProductContext(d.id)).toLowerCase().includes(search.toLowerCase())
-  );
-
   return (
     <div>
       <h2 className="text-2xl font-bold mb-6 font-mono tracking-wide">Orders Registry</h2>
-      <AdminSearchFilter value={search} onChange={setSearch} placeholder="Search exact orders, products, or identities..." />
+      <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <AdminSearchFilter value={search} onChange={(value) => updateParam('q', value)} placeholder="Search order number or customer email..." />
+        <select
+          value={statusFilter}
+          onChange={e => updateParam('status', e.target.value)}
+          className="rounded border border-nano-border bg-black px-3 py-2 text-xs font-bold uppercase tracking-wider text-white focus:border-nano-yellow focus:outline-none"
+        >
+          <option value="all">All orders</option>
+          <option value="warnings">Warnings</option>
+          <option value="paid">Paid</option>
+          <option value="unpaid">Unpaid</option>
+        </select>
+      </div>
       
       {error && (
         <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded mb-6 font-mono text-sm">
@@ -143,12 +195,12 @@ const OrdersAdmin: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {data.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="p-8 text-center text-gray-500 italic text-sm">No localized orders found matching filter criteria.</td>
                 </tr>
               ) : (
-                filtered.map((row) => {
+                data.map((row) => {
                   const pCtx = getProductContext(row.id);
                   const contactId = contactsMap.get(row.customer_email);
 
@@ -196,6 +248,7 @@ const OrdersAdmin: React.FC = () => {
               )}
             </tbody>
           </table>
+          <AdminPagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
         </div>
       )}
     </div>

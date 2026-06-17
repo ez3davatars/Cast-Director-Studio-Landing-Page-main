@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AdminSearchFilter from '../../components/AdminSearchFilter';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ExternalLink, Terminal } from 'lucide-react';
 
 const FILTER_OPTIONS = [
@@ -23,9 +23,17 @@ const WebhooksAdmin: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState<(typeof FILTER_OPTIONS)[number]['key']>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeFilter = (searchParams.get('filter') || 'all') as (typeof FILTER_OPTIONS)[number]['key'];
   const [selectedPayload, setSelectedPayload] = useState<any | null>(null);
   const navigate = useNavigate();
+
+  const setActiveFilter = (filter: (typeof FILTER_OPTIONS)[number]['key']) => {
+    const params = new URLSearchParams(searchParams);
+    if (filter === 'all') params.delete('filter');
+    else params.set('filter', filter);
+    setSearchParams(params);
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,7 +61,7 @@ const WebhooksAdmin: React.FC = () => {
 
         // Map by Email
         if (emails.length > 0) {
-           const { data: emailData } = await supabase.from('contacts').select('id, email').in('email', emails);
+           const { data: emailData } = await supabase.from('crm_contacts').select('id, email').in('email', emails);
            emailData?.forEach(c => cMap.set(c.email, c.id));
         }
         

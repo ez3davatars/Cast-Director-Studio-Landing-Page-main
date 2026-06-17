@@ -1,6 +1,37 @@
 import { useRef, useEffect, useState } from 'react';
 import { motion, useScroll, useTransform, useSpring, useReducedMotion } from 'framer-motion';
 
+const heroBenefits = [
+  {
+    title: 'Guided Creative Workflows',
+    body: 'Choose style, lighting, wardrobe, props, and scene direction without writing complex prompts from scratch.',
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m4-2a8 8 0 11-16 0 8 8 0 0116 0z" />
+    ),
+  },
+  {
+    title: 'Built-In Prompt Intelligence',
+    body: 'Cast Director Studio translates your selections into carefully structured AI instructions for Gemini.',
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.75h4.5m-7.5 4.5h10.5m-12 4.5h13.5m-10.5 4.5h7.5m-4.5 3h1.5" />
+    ),
+  },
+  {
+    title: 'Faster Production Iteration',
+    body: 'Move from idea to usable visual assets with less prompt experimentation and less trial-and-error.',
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0011.95 2.95M18.5 9A7 7 0 006.55 6.05" />
+    ),
+  },
+  {
+    title: 'Desktop-First Asset Control',
+    body: 'Keep projects, references, character sheets, and creative assets organized under your control.',
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7.5A2.5 2.5 0 016.5 5H10l2 2h5.5A2.5 2.5 0 0120 9.5v7A2.5 2.5 0 0117.5 19h-11A2.5 2.5 0 014 16.5v-9z" />
+    ),
+  },
+];
+
 export default function Hero() {
   const heroRef = useRef<HTMLElement>(null);
   const prefersReducedMotion = useReducedMotion();
@@ -105,37 +136,37 @@ export default function Hero() {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 rounded-full border border-nano-yellow/30 bg-nano-yellow/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-nano-yellow backdrop-blur-sm shadow-[0_0_20px_rgba(250,204,21,0.15)]">
             <span className="h-1.5 w-1.5 rounded-full bg-nano-yellow animate-pulse" />
-            Creative Direction for Gemini and AI Models
+            Gemini-Powered Creative Production
           </div>
 
           {/* Headline */}
           <h1 className="mx-auto mt-8 w-full max-w-[820px] font-display text-[38px] sm:text-5xl md:text-6xl lg:text-[76px] font-extrabold tracking-tight text-white leading-[1.1] md:leading-[1.05]">
             <span className="block mb-1" style={{ textShadow: '0 2px 40px rgba(0,0,0,0.8), 0 0 80px rgba(250,204,21,0.12)' }}>
-              The Creative Control Layer
+              Professional AI Visuals
             </span>
             <span className="block pb-1 bg-gradient-to-r from-nano-yellow via-[#FDE68A] to-[#FEF3C7] bg-clip-text text-transparent">
-              for Gemini and AI Image Generation.
+              Without Prompt Engineering
             </span>
           </h1>
 
           {/* Paragraph */}
           <p className="mx-auto mt-8 max-w-[600px] text-[16px] leading-[1.8] text-slate-300 md:text-[18px]" style={{ textShadow: '0 2px 20px rgba(0,0,0,0.9)' }}>
-            Turn ideas into production-ready visuals faster with guided creative controls for characters, lighting, wardrobe, props, scene direction, and digital doubles. Stop wrestling with prompts. Start directing results.
+            Create production-ready characters, spokespeople, mascots, digital doubles, marketing visuals, and AI video foundations through guided creative workflows built on Gemini.
           </p>
 
           {/* CTA Buttons */}
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4 relative z-30">
-            <a href="#pricing" className="rounded-full bg-nano-yellow px-8 py-4 text-[15px] font-bold text-black transition-all hover:bg-[#eab308] shadow-[0_0_25px_rgba(250,204,21,0.3)] hover:shadow-[0_0_35px_rgba(250,204,21,0.5)] hover:-translate-y-0.5 tracking-[0.1em] ring-2 ring-nano-yellow/20 ring-offset-2 ring-offset-nano-abyss">
-              VIEW PRICING
-            </a>
             <a href="#workflow" className="rounded-full border border-white/10 bg-white/5 px-8 py-4 text-[15px] font-bold text-slate-300 transition-all hover:bg-white/10 hover:border-white/20 hover:text-white backdrop-blur-sm tracking-[0.1em]">
               SEE HOW IT WORKS
+            </a>
+            <a href="#pricing" className="rounded-full bg-nano-yellow px-8 py-4 text-[15px] font-bold text-black transition-all hover:bg-[#eab308] shadow-[0_0_25px_rgba(250,204,21,0.3)] hover:shadow-[0_0_35px_rgba(250,204,21,0.5)] hover:-translate-y-0.5 tracking-[0.1em] ring-2 ring-nano-yellow/20 ring-offset-2 ring-offset-nano-abyss">
+              VIEW PRICING
             </a>
           </div>
 
           {/* Sub-CTA tagline */}
           <p className="mx-auto mt-5 max-w-[560px] text-[13px] leading-relaxed text-slate-400 tracking-wide">
-            Built for creators who need guided creative direction, faster iteration, and production-ready asset control.
+            Make creative selections. Cast Director Studio translates them into optimized AI instructions behind the scenes.
           </p>
 
           {/* Feature Rail — Premium Director Control Rail */}
@@ -145,76 +176,23 @@ export default function Hero() {
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.04] via-transparent to-nano-yellow/[0.04]" />
               
               <div className="relative grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 text-left">
-                
-                {/* Segment 1 */}
-                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
-                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
-                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
-                  <div className="relative flex flex-col gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
-                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Guided Creative Control</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Direct characters, wardrobe, lighting, props, and scenes without writing complex prompts.</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Segment 2 */}
-                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
-                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
-                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
-                  <div className="relative flex flex-col gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
-                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Faster Production Workflows</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Spend less time rebuilding ideas and more time creating usable assets.</div>
+                {heroBenefits.map((benefit) => (
+                  <div key={benefit.title} className="group relative min-h-[154px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
+                    <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
+                    <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
+                    <div className="relative flex flex-col gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
+                        <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          {benefit.icon}
+                        </svg>
+                      </div>
+                      <div>
+                        <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">{benefit.title}</div>
+                        <div className="text-[13px] leading-relaxed text-slate-400">{benefit.body}</div>
+                      </div>
                     </div>
                   </div>
-                </div>
-
-                {/* Segment 3 */}
-                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
-                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
-                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
-                  <div className="relative flex flex-col gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
-                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Desktop-First Asset Ownership</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Keep projects, references, character sheets, and creative assets under your control.</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Segment 4 */}
-                <div className="group relative min-h-[136px] overflow-hidden rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:-translate-y-1 hover:border-nano-yellow/35 hover:bg-white/[0.06]">
-                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:via-nano-yellow/40 transition-colors duration-300" />
-                  <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/5 rounded-full blur-2xl group-hover:bg-nano-yellow/10 transition-colors duration-500" />
-                  <div className="relative flex flex-col gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-nano-yellow/10 group-hover:border-nano-yellow/30 transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.02)] group-hover:shadow-[0_0_20px_rgba(250,204,21,0.15)]">
-                      <svg className="w-4 h-4 text-white group-hover:text-nano-yellow transition-colors duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-[15px] font-semibold text-white mb-1 group-hover:text-nano-yellow transition-colors duration-300">Powered By Gemini</div>
-                      <div className="text-[13px] leading-relaxed text-slate-400">Leverage Google's latest image generation models through workflows built for creators.</div>
-                    </div>
-                  </div>
-                </div>
-
+                ))}
               </div>
             </div>
           </div>

@@ -40,7 +40,7 @@ const LicensesAdmin: React.FC = () => {
         ]);
 
         const oMap = new Map();
-        let emails: string[] = [];
+        const emails: string[] = [];
         if (ordersRes.status === 'fulfilled' && !ordersRes.value.error) {
             ordersRes.value.data.forEach((o: any) => {
                 oMap.set(o.id, o.customer_email);
