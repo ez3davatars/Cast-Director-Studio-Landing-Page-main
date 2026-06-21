@@ -5,13 +5,14 @@ import DuplicatePurchaseModal from './DuplicatePurchaseModal';
 import { getProductByKey, resolveCatalogEntryFromDbProduct, resolveDisplayName } from '../lib/products';
 import { supabase } from '../lib/supabase';
 import { getAffiliateAttributionHeaders, withAffiliateAttributionBody } from '../lib/affiliateAttribution';
+import { startSubscriptionCheckout, SUBSCRIPTION_PRODUCT_KEYS } from '../lib/launchCheckout';
 
 /* ── Fallback prices shown when live pricing data is unavailable ── */
 const FALLBACK_PRICES: Record<string, { displayPrice: string; interval: string; billingSuffix: string }> = {
-  starter:                { displayPrice: '$49',  interval: 'month', billingSuffix: '/month' },
-  starter_monthly:        { displayPrice: '$49',  interval: 'month', billingSuffix: '/month' },
-  pro:                    { displayPrice: '$99',  interval: 'month', billingSuffix: '/month' },
-  pro_monthly:            { displayPrice: '$99',  interval: 'month', billingSuffix: '/month' },
+  starter:                { displayPrice: '$59',  interval: 'month', billingSuffix: '/month' },
+  subscription_starter:   { displayPrice: '$59',  interval: 'month', billingSuffix: '/month' },
+  pro:                    { displayPrice: '$119', interval: 'month', billingSuffix: '/month' },
+  subscription_pro:       { displayPrice: '$119', interval: 'month', billingSuffix: '/month' },
   indie_desktop_byok:     { displayPrice: '$199', interval: '',      billingSuffix: ' one-time' },
   agency_desktop_byok:    { displayPrice: '$499', interval: '',      billingSuffix: ' one-time' },
   agency_commercial_byok: { displayPrice: '$499', interval: '',      billingSuffix: ' one-time' },
@@ -24,8 +25,8 @@ const FALLBACK_PRICES: Record<string, { displayPrice: string; interval: string; 
    Edge Function PRICE_MAP uses the canonical billing keys.  This map
    ensures the payload always contains the key the function expects. */
 const CHECKOUT_KEY_MAP: Record<string, string> = {
-  starter:             'starter_monthly',
-  pro:                 'pro_monthly',
+  starter:             SUBSCRIPTION_PRODUCT_KEYS.starter, // 'subscription_starter'
+  pro:                 SUBSCRIPTION_PRODUCT_KEYS.pro,     // 'subscription_pro'
   agency_desktop_byok: 'agency_commercial_byok',
 };
 
@@ -234,6 +235,37 @@ const Pricing: React.FC<PricingProps> = ({
       const catalogEntry = resolveCatalogEntryFromDbProduct(product);
       const rawKey = catalogEntry?.productKey || product.product_key || 'unknown';
       const productKey = CHECKOUT_KEY_MAP[rawKey] || rawKey;
+
+      // Hosted subscriptions (Starter / Pro) use the productKey-only contract and
+      // REQUIRE authentication. Route them through the shared, tested helper so the
+      // browser never sends a price id, mode, or credit amount.
+      const isSubscriptionPlan =
+        productKey === SUBSCRIPTION_PRODUCT_KEYS.starter ||
+        productKey === SUBSCRIPTION_PRODUCT_KEYS.pro;
+
+      if (isSubscriptionPlan) {
+        const { data: { session: activeSession } } = await supabase.auth.getSession();
+        if (!activeSession?.access_token) {
+          // No guest subscription checkout — the backend rejects it. Prompt sign-in.
+          setCheckoutError('Please sign in or create an account to start a subscription.');
+          onSignIn();
+          return;
+        }
+
+        const plan = productKey === SUBSCRIPTION_PRODUCT_KEYS.pro ? 'pro' : 'starter';
+        const subSuccessUrl = `${window.location.origin}/get-started#session_id={CHECKOUT_SESSION_ID}&type=hosted`;
+
+        const { url } = await startSubscriptionCheckout({
+          plan,
+          accessToken: activeSession.access_token,
+          returnUrl: subSuccessUrl,
+          supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
+          supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+          extraHeaders: getAffiliateAttributionHeaders(),
+        });
+        window.location.href = url;
+        return;
+      }
 
       // Credit packs require auth — guard early for better UX
       const isCreditPack = productKey === 'credit_pack_100' || productKey === 'credit_pack_500';

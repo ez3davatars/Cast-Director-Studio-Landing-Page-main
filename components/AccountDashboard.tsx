@@ -5,6 +5,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { getAffiliateAttributionHeaders, withAffiliateAttributionBody } from '../lib/affiliateAttribution';
+import { startSubscriptionCheckout, SubscriptionAuthRequiredError, type SubscriptionPlan } from '../lib/launchCheckout';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
 import { Loader2, Info, MessageSquare, LifeBuoy, Monitor, Smartphone, Laptop, X, AlertTriangle } from 'lucide-react';
 
@@ -786,22 +787,15 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
     };
 
     // ── Hosted Subscription Checkout ──
-    const handleSubscriptionCheckout = async (productKey: string) => {
-        setTopUpLoading(productKey);
+    // Authoritative contract: send a productKey ONLY (subscription_starter /
+    // subscription_pro). The Edge Function derives the Stripe price, the monthly
+    // amount, and the paid-credit grant server-side from that key — the browser
+    // never sends a price id, mode, or credit amount. Auth is mandatory.
+    const handleSubscriptionCheckout = async (plan: SubscriptionPlan) => {
+        setTopUpLoading(plan);
         setSubError(null);
 
         try {
-            const { data: product } = await supabase.from('products').select('*').eq('product_key', productKey).eq('is_active', true).maybeSingle();
-
-            if (!product || !product.stripe_price_id) {
-                setSubError('This product is currently unavailable. Please try again later.');
-                return;
-            }
-            if (product.stripe_price_id.startsWith('REPLACE_WITH_')) {
-                setSubError('This product is not yet configured for checkout.');
-                return;
-            }
-
             const { data: { session: activeSession } } = await supabase.auth.getSession();
             if (!activeSession?.access_token) {
                 setSubError('Please sign in to continue.');
@@ -810,46 +804,22 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
             const returnUrl = `${window.location.origin}/get-started#session_id={CHECKOUT_SESSION_ID}&type=hosted`;
 
-            const catalogEntry = resolveCatalogEntryFromDbProduct(product);
-
-            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-                headers: getAffiliateAttributionHeaders(),
-                body: withAffiliateAttributionBody({
-                    priceId: product.stripe_price_id,
-                    mode: catalogEntry?.checkoutMode || 'subscription',
-                    productKey: productKey,
-                    successUrl: returnUrl,
-                    cancelUrl: `${window.location.origin}/#pricing`,
-                })
+            const { url } = await startSubscriptionCheckout({
+                plan,
+                accessToken: activeSession.access_token,
+                returnUrl,
+                supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
+                supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+                extraHeaders: getAffiliateAttributionHeaders(),
             });
 
-            if (error) {
-                let parsedMsg = error.message || 'Checkout failed';
-                let isDuplicate = false;
-                try {
-                    if (error.context && typeof error.context.json === 'function') {
-                        const body = await error.context.json();
-                        parsedMsg = body.message || body.error || parsedMsg;
-                        if (body.code === 'duplicate_purchase') isDuplicate = true;
-                    } else if (error.message?.includes('already own')) {
-                        isDuplicate = true;
-                    }
-                } catch (e) { /* ignore parse error */ }
-
-                if (isDuplicate) {
-                    setSubError(parsedMsg !== 'Edge Function returned a non-2xx status code' ? parsedMsg : 'You already own this product.');
-                } else {
-                    throw new Error(parsedMsg);
-                }
-                return;
-            }
-            if (data?.url) {
-                window.location.href = data.url;
-            } else {
-                throw new Error('Checkout session URL was not returned.');
-            }
+            window.location.href = url;
         } catch (err: any) {
-            setSubError(err.message || 'An unexpected error occurred during checkout.');
+            if (err instanceof SubscriptionAuthRequiredError) {
+                setSubError('Please sign in to continue.');
+            } else {
+                setSubError(err.message || 'An unexpected error occurred during checkout.');
+            }
         } finally {
             setTopUpLoading(null);
         }
@@ -1475,7 +1445,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
                                                 >
                                                     {topUpLoading === 'pro' && <Loader2 size={14} className="animate-spin" />}
-                                                    Upgrade to Pro — $99/month
+                                                    Upgrade to Pro — $119/month
                                                 </button>
                                             </div>
                                             {portalError && (
@@ -1496,7 +1466,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
                                                 >
                                                     {topUpLoading === 'starter' && <Loader2 size={14} className="animate-spin" />}
-                                                    Buy Starter — $49/month
+                                                    Buy Starter — $59/month
                                                 </button>
                                                 <button
                                                     onClick={() => handleSubscriptionCheckout('pro')}
@@ -1504,7 +1474,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
                                                 >
                                                     {topUpLoading === 'pro' && <Loader2 size={14} className="animate-spin" />}
-                                                    Buy Pro — $99/month
+                                                    Buy Pro — $119/month
                                                 </button>
                                             </div>
                                         </>
