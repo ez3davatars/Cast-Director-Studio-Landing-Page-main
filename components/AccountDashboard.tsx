@@ -6,6 +6,7 @@ import { supabase, invokeAuthenticatedFunction } from '../lib/supabase';
 import { getProductByStripePriceId, getProductByKey, resolveCatalogEntryFromDbProduct } from '../lib/products';
 import { getAffiliateAttributionHeaders, withAffiliateAttributionBody } from '../lib/affiliateAttribution';
 import { startSubscriptionCheckout, SubscriptionAuthRequiredError, type SubscriptionPlan } from '../lib/launchCheckout';
+import { resolveSubscriptionPlanKey, subscriptionPlanDisplayName } from '../lib/subscriptionDisplay';
 import { OrderViewModel, LicenseViewModel, DownloadViewModel } from '../types';
 import { Loader2, Info, MessageSquare, LifeBuoy, Monitor, Smartphone, Laptop, X, AlertTriangle } from 'lucide-react';
 
@@ -512,12 +513,13 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                 agencyExpiration: getByokExpiration(agencyLic),
             });
 
-            // Analyze Subscriptions
+            // Analyze Subscriptions.
+            // Normalize the stored canonical product key (subscription_starter /
+            // subscription_pro, written by the webhook into metadata) to the UI
+            // plan ('starter' | 'pro'). Does not depend on the products catalog.
             const resolveSubKey = (sub: any) => {
-                if (sub.metadata?.product_key) return sub.metadata.product_key;
-                const dbProd = productsMap.get(sub.product_id);
-                if (dbProd) return dbProd.product_key;
-                return null;
+                const rawKey = sub.metadata?.product_key || productsMap.get(sub.product_id)?.product_key || null;
+                return resolveSubscriptionPlanKey(rawKey);
             };
 
             const activeSubsList = subsRes.data || [];
@@ -1934,7 +1936,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                 {subscriptions.map((sub, idx) => (
                                                     <div key={idx} className="p-4 bg-black/30 border border-nano-border/50 text-sm flex justify-between items-center">
                                                         <div>
-                                                            <strong className="text-white block uppercase tracking-wide">{sub.metadata?.product_name || 'Subscription'}</strong>
+                                                            <strong className="text-white block uppercase tracking-wide">{sub.metadata?.product_name || subscriptionPlanDisplayName(sub.metadata?.product_key)}</strong>
                                                             <span className={`text-xs ${sub.status === 'active' ? 'text-green-400' : 'text-nano-text'}`}>
                                                                 Status: {sub.status || 'N/A'}
                                                             </span>
