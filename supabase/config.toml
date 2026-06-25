@@ -80,3 +80,12 @@ verify_jwt = true
 
 [functions.stripe-connect-webhook]
 verify_jwt = false
+
+[functions.admin-create-release-upload]
+verify_jwt = false
+
+[functions.admin-publish-desktop-release]
+verify_jwt = false
+
+[functions.get-latest-desktop-release]
+verify_jwt = false
