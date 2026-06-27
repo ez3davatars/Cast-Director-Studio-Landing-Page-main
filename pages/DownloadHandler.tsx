@@ -109,7 +109,7 @@ const DownloadHandler = () => {
                                 Windows SmartScreen Notice
                             </h4>
                             <p className="leading-relaxed">
-                                Because Cast Director Studio is a new desktop application, Windows may show a “Windows protected your PC” message the first time you open the installer.
+                                Because Cast Director Studio is a new desktop application, Windows may show a â€œWindows protected your PCâ€ message the first time you open the installer.
                             </p>
                             <p className="leading-relaxed">
                                 This can happen with new apps that have not yet built Microsoft SmartScreen reputation. If you downloaded Cast Director Studio from your official account dashboard at castdirectorstudio.com, this is expected.
@@ -132,12 +132,12 @@ const DownloadHandler = () => {
                             <div className="pt-3 border-t border-amber-500/10">
                                 <details className="group cursor-pointer select-none">
                                     <summary className="text-nano-text/50 hover:text-white transition-colors list-none flex items-center gap-1">
-                                        <span className="transition-transform group-open:rotate-90">▶</span>
+                                        <span className="transition-transform group-open:rotate-90">â–¶</span>
                                         <span>View SHA-256 Hash Verification</span>
                                     </summary>
                                     <div className="mt-2 pl-4 pr-2 py-2 bg-black/40 border border-nano-border/40 font-mono text-[10px] text-nano-yellow select-all break-all rounded-sm">
                                         <span className="text-nano-text/60 block text-[9px] uppercase tracking-wider mb-0.5">SHA-256 Hash</span>
-                                        564E67B79F95B2B6558EB46ABE66C088458B93E8ABAE6F76229F2BC732A041AD
+                                        56AA635B9EA3A50C31EB356FB00D8D18520AE3E08EA9C4DC3F38B020B9E54E4E
                                     </div>
                                 </details>
                             </div>

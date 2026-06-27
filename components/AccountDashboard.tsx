@@ -370,7 +370,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             const mappedLicenses: LicenseViewModel[] = [];
             fetchedLicenses.forEach((l: any) => {
                 const key = l.license_key || 'KEY-MISSING';
-                const masked = key.length > 10 ? `${key.substring(0, 5)}...${key.substring(key.length - 5)}` : '••••••••••••';
+                const masked = key.length > 10 ? `${key.substring(0, 5)}...${key.substring(key.length - 5)}` : 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢';
                 const identity = resolveIdentity('license', l.license_name, l.order_item_id, l.order_id, l.product_id, l.stripe_price_id, 'Cast Director Studio License', l);
 
                 const normalizeStatus = (s: string | null | undefined): string => {
@@ -483,7 +483,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
             setCredits(walletRes.data?.credit_balance ?? null);
 
-            // Fetch account status separately — columns may not exist if migration hasn't run yet
+            // Fetch account status separately â€” columns may not exist if migration hasn't run yet
             try {
                 const { data: statusRes } = await supabase.from('profiles').select('account_status, account_status_reason').eq('id', targetUserId).maybeSingle();
                 if (statusRes) {
@@ -491,7 +491,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                     setAccountStatusReason(statusRes.account_status_reason || null);
                 }
             } catch (e) {
-                // Safe to ignore — columns may not exist yet
+                // Safe to ignore â€” columns may not exist yet
             }
             setOrders(mappedOrders.length > 0 ? mappedOrders : null);
             setLicenses(mappedLicenses.length > 0 ? mappedLicenses : null);
@@ -640,7 +640,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
             try {
                 await invokeAuthenticatedFunction('claim-purchases', {});
             } catch (err) {
-                // Non-blocking — claim is a best-effort safety net
+                // Non-blocking â€” claim is a best-effort safety net
                 console.warn('[Dashboard] claim-purchases safety net failed:', err);
             }
             loadDashboard();
@@ -648,15 +648,15 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         claimAndLoad();
     }, [session.user.id, session.user.email, window.location.search]);
 
-    // ── Credit Top-Up Checkout ──
-    // Uses productKey-only contract — the Edge Function resolves the Stripe price server-side.
+    // â”€â”€ Credit Top-Up Checkout â”€â”€
+    // Uses productKey-only contract â€” the Edge Function resolves the Stripe price server-side.
     // Credit packs always require authentication so the webhook can credit the user's balance.
     const handleTopUp = async (packKey: 'credit_pack_100' | 'credit_pack_500') => {
         setTopUpLoading(packKey);
         setTopUpError(null);
 
         try {
-            // 1. Require a valid session — no guest checkout for credit top-ups
+            // 1. Require a valid session â€” no guest checkout for credit top-ups
             const { data: { session: activeSession } } = await supabase.auth.getSession();
             if (!activeSession?.access_token) {
                 setTopUpError('Please sign in again before purchasing credits.');
@@ -716,7 +716,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         }
     };
 
-    // ── BYOK / Renewal Checkout ──
+    // â”€â”€ BYOK / Renewal Checkout â”€â”€
     const handleByokCheckout = async (productKey: string) => {
         setTopUpLoading(productKey);
         setByokError(null);
@@ -788,10 +788,10 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         }
     };
 
-    // ── Hosted Subscription Checkout ──
+    // â”€â”€ Hosted Subscription Checkout â”€â”€
     // Authoritative contract: send a productKey ONLY (subscription_starter /
     // subscription_pro). The Edge Function derives the Stripe price, the monthly
-    // amount, and the paid-credit grant server-side from that key — the browser
+    // amount, and the paid-credit grant server-side from that key â€” the browser
     // never sends a price id, mode, or credit amount. Auth is mandatory.
     const handleSubscriptionCheckout = async (plan: SubscriptionPlan) => {
         setTopUpLoading(plan);
@@ -827,7 +827,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         }
     };
 
-    // ── Device Deactivation ──
+    // â”€â”€ Device Deactivation â”€â”€
     const handleDeactivateDevice = async (activationId: string) => {
         setDeactivatingDeviceId(activationId);
         setDeviceError(null);
@@ -873,7 +873,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
         }
     };
 
-    // ── Stripe Billing Portal ──
+    // â”€â”€ Stripe Billing Portal â”€â”€
     const handleBillingPortal = async () => {
         setPortalLoading(true);
         setPortalError(null);
@@ -1075,7 +1075,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 </div>
                             </div>
                             <span className="text-[10px] text-nano-yellow/70 uppercase tracking-widest font-bold flex-shrink-0 group-hover:text-nano-yellow transition-colors">
-                                View →
+                                View â†’
                             </span>
                         </button>
                     )}
@@ -1101,7 +1101,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                         Your account is currently paused.{accountStatusReason ? ` Reason: ${accountStatusReason}.` : ''} Please contact support for assistance.
                                     </p>
                                     <a href="#support-tickets" className="inline-block mt-3 text-xs uppercase tracking-wider font-bold text-amber-400 hover:text-amber-300 transition-colors">
-                                        Contact Support →
+                                        Contact Support â†’
                                     </a>
                                 </div>
                             )}
@@ -1115,7 +1115,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                         Your account has been canceled.{accountStatusReason ? ` Reason: ${accountStatusReason}.` : ''} Please contact support if you believe this is an error.
                                     </p>
                                     <a href="#support-tickets" className="inline-block mt-3 text-xs uppercase tracking-wider font-bold text-red-400 hover:text-red-300 transition-colors">
-                                        Contact Support →
+                                        Contact Support â†’
                                     </a>
                                 </div>
                             )}
@@ -1172,15 +1172,15 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
                                             <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-2.5">
                                                 <div className="flex items-start gap-2.5 text-xs text-slate-400">
-                                                    <span className="text-red-400 mt-0.5">✦</span>
+                                                    <span className="text-red-400 mt-0.5">âœ¦</span>
                                                     <span>Used credits are non-refundable and will be deducted from your refund amount.</span>
                                                 </div>
                                                 <div className="flex items-start gap-2.5 text-xs text-slate-400">
-                                                    <span className="text-red-400 mt-0.5">✦</span>
+                                                    <span className="text-red-400 mt-0.5">âœ¦</span>
                                                     <span>Remaining subscription credits will be immediately revoked if the refund is approved.</span>
                                                 </div>
                                                 <div className="flex items-start gap-2.5 text-xs text-slate-400">
-                                                    <span className="text-red-400 mt-0.5">✦</span>
+                                                    <span className="text-red-400 mt-0.5">âœ¦</span>
                                                     <span>Final review and processing is handled by an administrator within 3-5 business days.</span>
                                                 </div>
                                             </div>
@@ -1306,12 +1306,12 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
 
 
 
-                            {/* Dual Ownership Banner — show when user has both Hosted + BYOK */}
+                            {/* Dual Ownership Banner â€” show when user has both Hosted + BYOK */}
                             {(subStatus?.hasStarter || subStatus?.hasPro) && (byokStatus?.hasIndie || byokStatus?.hasAgency) && (
                                 <div className="mb-12 rounded-sm border border-nano-yellow/30 bg-nano-yellow/5 p-6">
                                     <div className="flex items-start gap-4">
                                         <div className="flex-shrink-0 w-10 h-10 rounded-full bg-nano-yellow/20 flex items-center justify-center mt-0.5">
-                                            <span className="text-nano-yellow text-lg">⚡</span>
+                                            <span className="text-nano-yellow text-lg">âš¡</span>
                                         </div>
                                         <div className="flex-1">
                                             <h3 className="text-white font-bold mb-1">Managed API + BYOK Desktop Active</h3>
@@ -1337,7 +1337,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 </div>
                             )}
 
-                            {/* Credit Top-Up Section — only for users with credits or active subscriptions */}
+                            {/* Credit Top-Up Section â€” only for users with credits or active subscriptions */}
                             {(credits !== null || (subscriptions && subscriptions.some(s => s.status === 'active'))) && (
                                 <div className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                     <h3 className="text-lg font-bold mb-2">Top Up Credits</h3>
@@ -1356,7 +1356,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                             className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
                                         >
                                             {topUpLoading === 'credit_pack_100' && <Loader2 size={14} className="animate-spin" />}
-                                            100 Credits — $10
+                                            100 Credits â€” $10
                                         </button>
                                         <button
                                             onClick={() => handleTopUp('credit_pack_500')}
@@ -1364,7 +1364,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                             className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
                                         >
                                             {topUpLoading === 'credit_pack_500' && <Loader2 size={14} className="animate-spin" />}
-                                            500 Credits — $45
+                                            500 Credits â€” $45
                                         </button>
                                     </div>
                                 </div>
@@ -1447,7 +1447,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
                                                 >
                                                     {topUpLoading === 'pro' && <Loader2 size={14} className="animate-spin" />}
-                                                    Upgrade to Pro — $119/month
+                                                    Upgrade to Pro â€” $119/month
                                                 </button>
                                             </div>
                                             {portalError && (
@@ -1468,7 +1468,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
                                                 >
                                                     {topUpLoading === 'starter' && <Loader2 size={14} className="animate-spin" />}
-                                                    Buy Starter — $59/month
+                                                    Buy Starter â€” $59/month
                                                 </button>
                                                 <button
                                                     onClick={() => handleSubscriptionCheckout('pro')}
@@ -1476,7 +1476,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
                                                 >
                                                     {topUpLoading === 'pro' && <Loader2 size={14} className="animate-spin" />}
-                                                    Buy Pro — $119/month
+                                                    Buy Pro â€” $119/month
                                                 </button>
                                             </div>
                                         </>
@@ -1620,7 +1620,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 <div id="byok-license" className="mb-12 rounded-sm border border-nano-border bg-nano-panel/20 p-6">
                                     {byokStatus.hasAgency ? (
                                         <>
-                                            <h3 className="text-lg font-bold mb-4">Desktop License — Agency Commercial BYOK</h3>
+                                            <h3 className="text-lg font-bold mb-4">Desktop License â€” Agency Commercial BYOK</h3>
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                                                 <div>
                                                     <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Status</div>
@@ -1649,14 +1649,14 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                         className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
                                                     >
                                                         {topUpLoading === 'agency_updates_support' && <Loader2 size={14} className="animate-spin" />}
-                                                        Renew Updates & Priority Support — $249/year
+                                                        Renew Updates & Priority Support â€” $249/year
                                                     </button>
                                                 </div>
                                             )}
                                         </>
                                     ) : byokStatus.hasIndie ? (
                                         <>
-                                            <h3 className="text-lg font-bold mb-4">Desktop License — Indie Desktop BYOK</h3>
+                                            <h3 className="text-lg font-bold mb-4">Desktop License â€” Indie Desktop BYOK</h3>
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                                                 <div>
                                                     <div className="text-xs text-nano-text uppercase tracking-wide mb-1">Status</div>
@@ -1685,7 +1685,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                         className="px-6 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center gap-2"
                                                     >
                                                         {topUpLoading === 'indie_updates_support' && <Loader2 size={14} className="animate-spin" />}
-                                                        Renew Updates & Support — $99/year
+                                                        Renew Updates & Support â€” $99/year
                                                     </button>
                                                 )}
                                                 <button
@@ -1694,7 +1694,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     className="px-6 py-3 bg-nano-yellow text-black font-bold text-sm uppercase tracking-wide hover:bg-nano-gold transition-all disabled:opacity-50 flex items-center gap-2"
                                                 >
                                                     {topUpLoading === 'agency_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
-                                                    Upgrade to Agency Commercial BYOK — $499
+                                                    Upgrade to Agency Commercial BYOK â€” $499
                                                 </button>
                                             </div>
                                         </>
@@ -1728,7 +1728,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                             className="w-full px-5 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                                                         >
                                                             {topUpLoading === 'indie_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
-                                                            Buy Indie — $199
+                                                            Buy Indie â€” $199
                                                         </button>
                                                     </div>
                                                 </div>
@@ -1755,7 +1755,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                             className="w-full px-5 py-3 bg-white/10 text-white font-bold text-sm uppercase tracking-wide hover:bg-nano-yellow hover:text-black transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                                                         >
                                                             {topUpLoading === 'agency_desktop_byok' && <Loader2 size={14} className="animate-spin" />}
-                                                            Buy Agency — $499
+                                                            Buy Agency â€” $499
                                                         </button>
                                                     </div>
                                                 </div>
@@ -1770,7 +1770,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 </div>
                             )}
 
-                            {/* Activated Devices Section — only visible when at least one active BYOK license exists */}
+                            {/* Activated Devices Section â€” only visible when at least one active BYOK license exists */}
                             {(byokStatus?.hasIndie || byokStatus?.hasAgency) && (() => {
                                 const activeLic = byokStatus?.agencyLicense || byokStatus?.indieLicense;
                                 const limit = getActivationLimit(activeLic);
@@ -2035,7 +2035,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                     Windows SmartScreen Notice
                                                 </h4>
                                                 <p className="leading-relaxed">
-                                                    Windows may show a “Windows protected your PC” warning because Cast Director Studio is a new desktop app and is still building Microsoft SmartScreen reputation.
+                                                    Windows may show a â€œWindows protected your PCâ€ warning because Cast Director Studio is a new desktop app and is still building Microsoft SmartScreen reputation.
                                                 </p>
                                                 <p className="leading-relaxed">
                                                     If you downloaded the installer from your official Cast Director Studio account dashboard, this is expected. To continue, click <span className="underline font-semibold">More info</span>, then <span className="underline font-semibold">Run anyway</span>.
@@ -2045,12 +2045,12 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                                 </p>
                                                 <details className="mt-3 group cursor-pointer text-xs select-none pt-2 border-t border-amber-500/10">
                                                     <summary className="text-nano-text/50 hover:text-white transition-colors list-none flex items-center gap-1">
-                                                        <span className="transition-transform group-open:rotate-90">▶</span>
+                                                        <span className="transition-transform group-open:rotate-90">â–¶</span>
                                                         <span>View SHA-256 Hash Verification</span>
                                                     </summary>
                                                     <div className="mt-2 pl-4 pr-2 py-2 bg-black/40 border border-nano-border/40 font-mono text-[10px] text-nano-yellow select-all break-all rounded-sm">
                                                         <span className="text-nano-text/60 block text-[9px] uppercase tracking-wider mb-0.5">SHA-256 Hash</span>
-                                                        564E67B79F95B2B6558EB46ABE66C088458B93E8ABAE6F76229F2BC732A041AD
+                                                        56AA635B9EA3A50C31EB356FB00D8D18520AE3E08EA9C4DC3F38B020B9E54E4E
                                                     </div>
                                                 </details>
                                             </div>
@@ -2147,7 +2147,7 @@ const AccountDashboard: React.FC<AccountDashboardProps> = ({ session }) => {
                                 </div>
                             </div>
 
-                            {/* Support Tickets — Full Width */}
+                            {/* Support Tickets â€” Full Width */}
                             <div id="support-tickets" className="mt-8" ref={supportSectionRef}>
                                 <SupportTickets session={session} onUnreadCount={handleUnreadCount} autoOpenTicketId={autoOpenTicketId} triggerNewTicket={triggerNewTicket} />
                             </div>
