@@ -137,7 +137,7 @@ const DownloadHandler = () => {
                                     </summary>
                                     <div className="mt-2 pl-4 pr-2 py-2 bg-black/40 border border-nano-border/40 font-mono text-[10px] text-nano-yellow select-all break-all rounded-sm">
                                         <span className="text-nano-text/60 block text-[9px] uppercase tracking-wider mb-0.5">SHA-256 Hash</span>
-                                        564E67B79F95B2B6558EB46ABE66C088458B93E8ABAE6F76229F2BC732A041AD
+                                        56AA635B9EA3A50C31EB356FB00D8D18520AE3E08EA9C4DC3F38B020B9E54E4E
                                     </div>
                                 </details>
                             </div>
